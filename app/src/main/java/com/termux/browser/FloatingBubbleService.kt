@@ -47,6 +47,11 @@ class FloatingBubbleService : Service() {
     private var floatingWindowParams: WindowManager.LayoutParams? = null
     private var hiddenWebViewContainer: FrameLayout? = null  // バブル状態でWebViewを保持
     private var isExpanded = false
+    private var isAnimating = false  // アニメーション中フラグ
+
+    // ドラッグ用の変数（クロージャでキャプチャするためメンバー変数に）
+    private var windowStartX = 0
+    private var windowStartY = 0
 
     // ウィンドウの位置・サイズを保存（復元用）
     private var savedWindowX: Float? = null
@@ -316,32 +321,52 @@ class FloatingBubbleService : Service() {
                 setLayerInset(1, inset, inset, inset, inset)
             }
             setOnClickListener {
+                // アニメーション中は無視
+                if (isAnimating) return@setOnClickListener
+
+                val params = floatingWindowParams ?: return@setOnClickListener
+                val wrapper = floatingWindow ?: return@setOnClickListener
+
+                isAnimating = true
+
                 // 閉じる時のアニメーション - バブルの位置に向かって縮小
                 val bubbleParams = bubbleView?.layoutParams as? WindowManager.LayoutParams
                 val bubbleSize = 130f
 
-                // containerの現在のサイズと位置
+                // containerの現在のサイズ
                 val currentWidth = container.width.toFloat()
                 val currentHeight = container.height.toFloat()
-                val currentX = container.translationX
-                val currentY = container.translationY
 
-                // ウィンドウの位置・サイズを保存
-                savedWindowX = currentX
-                savedWindowY = currentY
+                // ウィンドウの位置・サイズを保存（windowParamsから取得）
+                savedWindowX = params.x.toFloat()
+                savedWindowY = params.y.toFloat()
                 savedWindowWidth = currentWidth.toInt()
                 savedWindowHeight = currentHeight.toInt()
 
                 if (currentWidth <= 0 || currentHeight <= 0) {
+                    isAnimating = false
                     closeFloatingWindow()
                     return@setOnClickListener
                 }
+
+                // wrapperをフルスクリーンに戻す（アニメーション用）
+                // 1. containerのtranslationを設定（見た目位置を維持）
+                container.translationX = params.x.toFloat()
+                container.translationY = params.y.toFloat()
+
+                // 2. wrapperをフルスクリーンに
+                val screenWidth = resources.displayMetrics.widthPixels
+                val screenHeight = resources.displayMetrics.heightPixels
+                params.x = 0
+                params.y = 0
+                params.width = screenWidth
+                params.height = screenHeight
+                windowManager.updateViewLayout(wrapper, params)
 
                 val scaleXEnd = bubbleSize / currentWidth
                 val scaleYEnd = bubbleSize / currentHeight
 
                 // バブルの位置を計算
-                val screenWidth = resources.displayMetrics.widthPixels
                 val bubbleCenterX = screenWidth - (bubbleParams?.x ?: 50) - bubbleSize / 2f
                 val bubbleCenterY = (bubbleParams?.y ?: 200) + bubbleSize / 2f
 
@@ -361,7 +386,11 @@ class FloatingBubbleService : Service() {
                     .alpha(0f)
                     .setDuration(250)
                     .setInterpolator(AccelerateDecelerateInterpolator())
-                    .withEndAction { closeFloatingWindow() }
+                    .setListener(null)  // 開くアニメのリスナーをクリア
+                    .withEndAction {
+                        isAnimating = false
+                        closeFloatingWindow()
+                    }
                     .start()
             }
         }
@@ -373,21 +402,26 @@ class FloatingBubbleService : Service() {
         // タイトルバーのドラッグ処理
         var dragStartX = 0f
         var dragStartY = 0f
-        var containerStartTranslationX = 0f
-        var containerStartTranslationY = 0f
 
         header.setOnTouchListener { _, event ->
+            // アニメーション中はドラッグ無効
+            if (isAnimating) return@setOnTouchListener false
+
+            val params = floatingWindowParams ?: return@setOnTouchListener false
+            val wrapper = floatingWindow ?: return@setOnTouchListener false
+
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     dragStartX = event.rawX
                     dragStartY = event.rawY
-                    containerStartTranslationX = container.translationX
-                    containerStartTranslationY = container.translationY
+                    windowStartX = params.x
+                    windowStartY = params.y
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    container.translationX = containerStartTranslationX + (event.rawX - dragStartX)
-                    container.translationY = containerStartTranslationY + (event.rawY - dragStartY)
+                    params.x = windowStartX + (event.rawX - dragStartX).toInt()
+                    params.y = windowStartY + (event.rawY - dragStartY).toInt()
+                    windowManager.updateViewLayout(wrapper, params)
                     true
                 }
                 else -> false
@@ -472,6 +506,18 @@ class FloatingBubbleService : Service() {
             gravity = Gravity.TOP or Gravity.START
             x = 0
             y = 0
+            windowAnimations = 0
+
+            // PRIVATE_FLAG_NO_MOVE_ANIMATION をリフレクションで設定
+            try {
+                val privateFlagsField = WindowManager.LayoutParams::class.java.getField("privateFlags")
+                val noAnimField = WindowManager.LayoutParams::class.java.getField("PRIVATE_FLAG_NO_MOVE_ANIMATION")
+                val currentFlags = privateFlagsField.getInt(this)
+                val noAnimFlag = noAnimField.getInt(this)
+                privateFlagsField.setInt(this, currentFlags or noAnimFlag)
+            } catch (e: Exception) {
+                android.util.Log.w("FloatingBubble", "Failed to set PRIVATE_FLAG_NO_MOVE_ANIMATION: ${e.message}")
+            }
         }
 
         floatingWindow = wrapper
@@ -479,33 +525,21 @@ class FloatingBubbleService : Service() {
         windowManager.addView(wrapper, windowParams)
         isExpanded = true
 
-        // wrapperのタッチ処理（container外タッチで透過モードへ）
-        wrapper.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                val childX = container.translationX
-                val childY = container.translationY
-                val childWidth = container.width.toFloat()
-                val childHeight = container.height.toFloat()
+        // ローカル関数：wrapperをUIサイズに縮小（開くアニメ完了時）
+        val shrinkWrapperToUI = {
+            val winX = container.translationX.toInt()
+            val winY = container.translationY.toInt()
+            val winW = container.width
+            val winH = container.height
 
-                val isInsideContainer = event.x >= childX && event.x <= childX + childWidth &&
-                        event.y >= childY && event.y <= childY + childHeight
-
-                if (!isInsideContainer) {
-                    // container外タッチ → ウィンドウレベルで透過モードへ
-                    windowParams.alpha = 0.8f  // LayoutParams.alphaで設定（Android 12+要件）
-                    windowManager.updateViewLayout(wrapper, windowParams)
-                }
-            }
-            false  // イベントを子に伝播
-        }
-
-        // containerタッチで透過モード解除
-        container.setOnTouchListener { _, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                windowParams.alpha = 1.0f  // ウィンドウレベルで不透明に戻す
-                windowManager.updateViewLayout(wrapper, windowParams)
-            }
-            false  // イベントを子に伝播
+            // translationを先にリセットしてからwrapperを更新
+            container.translationX = 0f
+            container.translationY = 0f
+            windowParams.x = winX
+            windowParams.y = winY
+            windowParams.width = winW
+            windowParams.height = winH
+            windowManager.updateViewLayout(wrapper, windowParams)
         }
 
         // リサイズハンドルのドラッグ処理
@@ -515,6 +549,12 @@ class FloatingBubbleService : Service() {
         var startHeight = 0
 
         resizeHandle.setOnTouchListener { _, event ->
+            // アニメーション中はリサイズ無効
+            if (isAnimating) return@setOnTouchListener false
+
+            val params = floatingWindowParams ?: return@setOnTouchListener false
+            val wrapper = floatingWindow ?: return@setOnTouchListener false
+
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     resizeStartX = event.rawX
@@ -534,7 +574,11 @@ class FloatingBubbleService : Service() {
                     val newWidth = maxOf(minWidth, (startWidth + deltaX).toInt())
                     val newHeight = maxOf(minHeight, (startHeight + deltaY).toInt())
 
+                    // containerとwrapper両方のサイズを更新
                     container.layoutParams = FrameLayout.LayoutParams(newWidth, newHeight)
+                    params.width = newWidth
+                    params.height = newHeight
+                    windowManager.updateViewLayout(wrapper, params)
                     true
                 }
                 else -> false
@@ -560,20 +604,45 @@ class FloatingBubbleService : Service() {
         val startTranslationX = bubbleCenterX - finalWidth / 2f
         val startTranslationY = bubbleCenterY - finalHeight / 2f
 
+        // 前のViewPropertyAnimatorをキャンセル（閉じるアニメのリスナーが残っている可能性）
+        container.animate().cancel()
+        container.animate().setListener(null)
+
         container.alpha = 1f
         container.scaleX = scaleXStart
         container.scaleY = scaleYStart
         container.translationX = startTranslationX
         container.translationY = startTranslationY
 
-        container.animate()
-            .scaleX(1f)
-            .scaleY(1f)
-            .translationX(initialX)
-            .translationY(initialY)
-            .setDuration(350)
-            .setInterpolator(AccelerateDecelerateInterpolator())
-            .start()
+        // アニメーション中フラグを立てる
+        isAnimating = true
+
+        // レイアウト確定後にアニメーション開始
+        wrapper.post {
+            ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 350
+                interpolator = AccelerateDecelerateInterpolator()
+                addUpdateListener { animator ->
+                    val fraction = animator.animatedValue as Float
+                    container.translationX = startTranslationX + (initialX - startTranslationX) * fraction
+                    container.translationY = startTranslationY + (initialY - startTranslationY) * fraction
+                    container.scaleX = scaleXStart + (1f - scaleXStart) * fraction
+                    container.scaleY = scaleYStart + (1f - scaleYStart) * fraction
+                }
+                addListener(object : android.animation.Animator.AnimatorListener {
+                    override fun onAnimationStart(animation: android.animation.Animator) {}
+                    override fun onAnimationEnd(animation: android.animation.Animator) {
+                        shrinkWrapperToUI()
+                        isAnimating = false
+                    }
+                    override fun onAnimationCancel(animation: android.animation.Animator) {
+                        isAnimating = false
+                    }
+                    override fun onAnimationRepeat(animation: android.animation.Animator) {}
+                })
+                start()
+            }
+        }
 
         // WebViewを中間（175ms後）からフェードイン
         webViewContainer.postDelayed({
