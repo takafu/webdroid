@@ -1,0 +1,48 @@
+# Gradle
+.gradle/
+build/
+!gradle-wrapper.jar
+
+# Local configuration
+local.properties
+
+# Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+.DS_Store
+
+# Logs
+*.log
+
+# Built APKs
+*.apk
+*.aab
+
+# Generated files
+bin/
+gen/
+out/
+
+# Gradle cache
+gradle-app.setting
+.gradletasknamecache
+
+# NDK
+obj/
+
+# External native build
+.externalNativeBuild
+.cxx/
+
+# Keystore files
+*.jks
+*.keystore
+
+# Misc
+*.swp
+*~
+
+# Screenshots
+screenshot*.png
