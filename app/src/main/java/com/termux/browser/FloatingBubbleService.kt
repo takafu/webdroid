@@ -48,6 +48,12 @@ class FloatingBubbleService : Service() {
     private var hiddenWebViewContainer: FrameLayout? = null  // バブル状態でWebViewを保持
     private var isExpanded = false
 
+    // ウィンドウの位置・サイズを保存（復元用）
+    private var savedWindowX: Float? = null
+    private var savedWindowY: Float? = null
+    private var savedWindowWidth: Int? = null
+    private var savedWindowHeight: Int? = null
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -244,6 +250,12 @@ class FloatingBubbleService : Service() {
         // バブルを即座に非表示（シームレスな変形のため）
         bubbleView?.visibility = View.INVISIBLE
 
+        // ラッパー（画面全体サイズ、クリッピング無効）
+        val wrapper = FrameLayout(this).apply {
+            clipChildren = false
+            clipToPadding = false
+        }
+
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             // 全体を角丸に
@@ -255,9 +267,10 @@ class FloatingBubbleService : Service() {
             clipToOutline = true  // 子要素も角丸の境界でクリップ
         }
 
-        // ヘッダー（閉じるボタン）- グラデーション背景
+        // ヘッダー（ミニマイズボタン）- グラデーション背景
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             background = GradientDrawable().apply {
                 colors = intArrayOf(
                     Color.parseColor("#667eea"),
@@ -267,13 +280,14 @@ class FloatingBubbleService : Service() {
                 orientation = GradientDrawable.Orientation.LEFT_RIGHT
                 cornerRadii = floatArrayOf(24f, 24f, 24f, 24f, 0f, 0f, 0f, 0f)
             }
-            setPadding(24, 20, 24, 20)
+            val padding = 16
+            setPadding(padding, padding, padding, padding)
         }
 
         val title = TextView(this).apply {
             text = "🌐 Browser Automation"
             setTextColor(Color.WHITE)
-            textSize = 18f
+            textSize = 16f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             layoutParams = LinearLayout.LayoutParams(
                 0,
@@ -282,61 +296,103 @@ class FloatingBubbleService : Service() {
             )
         }
 
-        val closeButton = Button(this).apply {
-            text = "✕"
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.TRANSPARENT)
-            textSize = 28f
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
+        // ミニマイズボタン（丸の中に小さな丸）
+        val minimizeButton = View(this).apply {
+            val btnSize = 56
+            layoutParams = LinearLayout.LayoutParams(btnSize, btnSize)
+            // 外側の半透明丸 + 内側の白丸をレイヤーで描画
+            background = android.graphics.drawable.LayerDrawable(arrayOf(
+                GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.parseColor("#33FFFFFF"))
+                },
+                GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(Color.WHITE)
+                }
+            )).apply {
+                // 内側の丸を中央に小さく配置
+                val inset = 20
+                setLayerInset(1, inset, inset, inset, inset)
+            }
             setOnClickListener {
                 // 閉じる時のアニメーション - バブルの位置に向かって縮小
                 val bubbleParams = bubbleView?.layoutParams as? WindowManager.LayoutParams
-                val windowParams = floatingWindowParams
                 val bubbleSize = 130f
 
-                if (windowParams == null) {
+                // containerの現在のサイズと位置
+                val currentWidth = container.width.toFloat()
+                val currentHeight = container.height.toFloat()
+                val currentX = container.translationX
+                val currentY = container.translationY
+
+                // ウィンドウの位置・サイズを保存
+                savedWindowX = currentX
+                savedWindowY = currentY
+                savedWindowWidth = currentWidth.toInt()
+                savedWindowHeight = currentHeight.toInt()
+
+                if (currentWidth <= 0 || currentHeight <= 0) {
                     closeFloatingWindow()
                     return@setOnClickListener
                 }
-
-                val currentWidth = windowParams.width.toFloat()
-                val currentHeight = windowParams.height.toFloat()
 
                 val scaleXEnd = bubbleSize / currentWidth
                 val scaleYEnd = bubbleSize / currentHeight
 
                 // バブルの位置を計算
                 val screenWidth = resources.displayMetrics.widthPixels
-                val bubbleCenterX = screenWidth - (bubbleParams?.x ?: 50) - bubbleSize.toInt() / 2
-                val bubbleCenterY = (bubbleParams?.y ?: 200) + bubbleSize.toInt() / 2
+                val bubbleCenterX = screenWidth - (bubbleParams?.x ?: 50) - bubbleSize / 2f
+                val bubbleCenterY = (bubbleParams?.y ?: 200) + bubbleSize / 2f
 
-                // ウィンドウの現在の中心座標（左上基準なので計算）
-                val windowCenterX = windowParams.x + currentWidth / 2f
-                val windowCenterY = windowParams.y + currentHeight / 2f
+                // バブルの中心に移動するためのtranslation（pivotが中心なので、左上座標を計算）
+                val targetTranslationX = bubbleCenterX - currentWidth / 2f
+                val targetTranslationY = bubbleCenterY - currentHeight / 2f
 
-                // バブルへの移動量
-                val translationX = bubbleCenterX - windowCenterX
-                val translationY = bubbleCenterY - windowCenterY
+                // pivotを中心に設定
+                container.pivotX = currentWidth / 2f
+                container.pivotY = currentHeight / 2f
 
-                floatingWindow?.animate()
-                    ?.scaleX(scaleXEnd)
-                    ?.scaleY(scaleYEnd)
-                    ?.translationX(translationX)
-                    ?.translationY(translationY)
-                    ?.alpha(0f)
-                    ?.setDuration(250)
-                    ?.setInterpolator(AccelerateDecelerateInterpolator())
-                    ?.withEndAction { closeFloatingWindow() }
-                    ?.start()
+                container.animate()
+                    .scaleX(scaleXEnd)
+                    .scaleY(scaleYEnd)
+                    .translationX(targetTranslationX)
+                    .translationY(targetTranslationY)
+                    .alpha(0f)
+                    .setDuration(250)
+                    .setInterpolator(AccelerateDecelerateInterpolator())
+                    .withEndAction { closeFloatingWindow() }
+                    .start()
             }
         }
 
         header.addView(title)
-        header.addView(closeButton)
+        header.addView(minimizeButton)
         container.addView(header)
+
+        // タイトルバーのドラッグ処理
+        var dragStartX = 0f
+        var dragStartY = 0f
+        var containerStartTranslationX = 0f
+        var containerStartTranslationY = 0f
+
+        header.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    dragStartX = event.rawX
+                    dragStartY = event.rawY
+                    containerStartTranslationX = container.translationX
+                    containerStartTranslationY = container.translationY
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    container.translationX = containerStartTranslationX + (event.rawX - dragStartX)
+                    container.translationY = containerStartTranslationY + (event.rawY - dragStartY)
+                    true
+                }
+                else -> false
+            }
+        }
 
         // WebViewコンテナ - 内側にパディング
         val webViewContainer = FrameLayout(this).apply {
@@ -367,7 +423,7 @@ class FloatingBubbleService : Service() {
                 setColor(Color.parseColor("#667eea"))
                 cornerRadius = 8f
             }
-            layoutParams = LinearLayout.LayoutParams(48, 48).apply {
+            layoutParams = LinearLayout.LayoutParams(56, 56).apply {
                 gravity = Gravity.END
             }
         }
@@ -377,43 +433,80 @@ class FloatingBubbleService : Service() {
         val bubbleParams = bubbleView?.layoutParams as? WindowManager.LayoutParams
         val bubbleSize = 130
 
-        // ウィンドウの最終サイズ
-        val finalWidth = (resources.displayMetrics.widthPixels * 0.95).toInt()
-        val finalHeight = (resources.displayMetrics.heightPixels * 0.85).toInt()
-
-        // バブルの画面上の位置を計算（右上）
+        // 画面サイズ
         val screenWidth = resources.displayMetrics.widthPixels
         val screenHeight = resources.displayMetrics.heightPixels
+
+        // ウィンドウのサイズ（保存されていれば復元、なければデフォルト）
+        val finalWidth = savedWindowWidth ?: (screenWidth * 0.95).toInt()
+        val finalHeight = savedWindowHeight ?: (screenHeight * 0.45).toInt()
 
         // バブルの中心座標
         val bubbleCenterX = screenWidth - (bubbleParams?.x ?: 50) - bubbleSize / 2
         val bubbleCenterY = (bubbleParams?.y ?: 200) + bubbleSize / 2
 
-        // ウィンドウの初期位置（中央）
-        val initialX = (screenWidth - finalWidth) / 2
-        val initialY = (screenHeight - finalHeight) / 2
+        // containerの位置（保存されていれば復元、なければ上部中央に配置）
+        val margin = (screenWidth * 0.025).toInt()  // 左右に2.5%の余白
+        val initialX = savedWindowX ?: margin.toFloat()
+        val initialY = savedWindowY ?: margin.toFloat()
 
+        // containerのサイズを設定（位置はtranslationで管理）
+        container.layoutParams = FrameLayout.LayoutParams(finalWidth, finalHeight)
+
+        // wrapperにcontainerを追加
+        wrapper.addView(container)
+
+        // wrapperを画面全体サイズでWindowManagerに追加
         val windowParams = WindowManager.LayoutParams(
-            finalWidth,
-            finalHeight,
+            screenWidth,
+            screenHeight,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else
                 WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or  // ウィンドウがフォーカスを奪わない
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or  // ウィンドウ外のタッチを通す
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,  // 画面端を超えてレイアウト可能
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START  // 左上基準に変更
-            x = initialX
-            y = initialY
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
         }
 
-        floatingWindow = container
+        floatingWindow = wrapper
         floatingWindowParams = windowParams
-        windowManager.addView(container, windowParams)
+        windowManager.addView(wrapper, windowParams)
         isExpanded = true
+
+        // wrapperのタッチ処理（container外タッチで透過モードへ）
+        wrapper.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                val childX = container.translationX
+                val childY = container.translationY
+                val childWidth = container.width.toFloat()
+                val childHeight = container.height.toFloat()
+
+                val isInsideContainer = event.x >= childX && event.x <= childX + childWidth &&
+                        event.y >= childY && event.y <= childY + childHeight
+
+                if (!isInsideContainer) {
+                    // container外タッチ → ウィンドウレベルで透過モードへ
+                    windowParams.alpha = 0.8f  // LayoutParams.alphaで設定（Android 12+要件）
+                    windowManager.updateViewLayout(wrapper, windowParams)
+                }
+            }
+            false  // イベントを子に伝播
+        }
+
+        // containerタッチで透過モード解除
+        container.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                windowParams.alpha = 1.0f  // ウィンドウレベルで不透明に戻す
+                windowManager.updateViewLayout(wrapper, windowParams)
+            }
+            false  // イベントを子に伝播
+        }
 
         // リサイズハンドルのドラッグ処理
         var resizeStartX = 0f
@@ -426,8 +519,8 @@ class FloatingBubbleService : Service() {
                 MotionEvent.ACTION_DOWN -> {
                     resizeStartX = event.rawX
                     resizeStartY = event.rawY
-                    startWidth = windowParams.width
-                    startHeight = windowParams.height
+                    startWidth = container.width
+                    startHeight = container.height
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -438,10 +531,10 @@ class FloatingBubbleService : Service() {
                     val minWidth = 300
                     val minHeight = 400
 
-                    windowParams.width = maxOf(minWidth, (startWidth + deltaX).toInt())
-                    windowParams.height = maxOf(minHeight, (startHeight + deltaY).toInt())
+                    val newWidth = maxOf(minWidth, (startWidth + deltaX).toInt())
+                    val newHeight = maxOf(minHeight, (startHeight + deltaY).toInt())
 
-                    windowManager.updateViewLayout(container, windowParams)
+                    container.layoutParams = FrameLayout.LayoutParams(newWidth, newHeight)
                     true
                 }
                 else -> false
@@ -455,25 +548,29 @@ class FloatingBubbleService : Service() {
         val scaleXStart = bubbleSize.toFloat() / finalWidth
         val scaleYStart = bubbleSize.toFloat() / finalHeight
 
-        // ウィンドウの中心座標（左上基準なので計算）
-        val windowCenterX = initialX + finalWidth / 2f
-        val windowCenterY = initialY + finalHeight / 2f
+        // containerの最終中心座標（translationベース）
+        val finalCenterX = initialX + finalWidth / 2f
+        val finalCenterY = initialY + finalHeight / 2f
 
-        // バブルの位置からウィンドウの中心への移動量
-        val translationX = bubbleCenterX - windowCenterX
-        val translationY = bubbleCenterY - windowCenterY
+        // pivotをcontainerの中心に設定
+        container.pivotX = finalWidth / 2f
+        container.pivotY = finalHeight / 2f
+
+        // 開始位置：バブルの中心に合わせる
+        val startTranslationX = bubbleCenterX - finalWidth / 2f
+        val startTranslationY = bubbleCenterY - finalHeight / 2f
 
         container.alpha = 1f
         container.scaleX = scaleXStart
         container.scaleY = scaleYStart
-        container.translationX = translationX
-        container.translationY = translationY
+        container.translationX = startTranslationX
+        container.translationY = startTranslationY
 
         container.animate()
             .scaleX(1f)
             .scaleY(1f)
-            .translationX(0f)
-            .translationY(0f)
+            .translationX(initialX)
+            .translationY(initialY)
             .setDuration(350)
             .setInterpolator(AccelerateDecelerateInterpolator())
             .start()
