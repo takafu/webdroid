@@ -71,6 +71,16 @@ browser_ping() {
     curl -s "$BASE_URL/ping" | jq -r '.status'
 }
 
+# フローティングバブルを開始
+browser_bubble_start() {
+    curl -s -X POST "$BASE_URL/bubble/start" | jq -r '.message'
+}
+
+# フローティングバブルを停止
+browser_bubble_stop() {
+    curl -s -X POST "$BASE_URL/bubble/stop" | jq -r '.message'
+}
+
 # ヘルプ表示
 browser_help() {
     cat << 'EOF'
@@ -94,6 +104,8 @@ JavaScript実行:
 その他:
   browser_screenshot [file]   スクリーンショットを保存（デフォルト: screenshot.png）
   browser_ping                サーバー接続確認
+  browser_bubble_start        フローティングバブルを表示（Termuxと同時表示可能）
+  browser_bubble_stop         フローティングバブルを閉じる
   browser_help                このヘルプを表示
 
 使用例:

@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -132,6 +133,8 @@ class AutomationService : Service() {
                 uri == "/title" && method == Method.GET -> handleGetTitle()
                 uri == "/html" && method == Method.GET -> handleGetHtml()
                 uri == "/ping" && method == Method.GET -> handlePing()
+                uri == "/bubble/start" && method == Method.POST -> handleStartBubble()
+                uri == "/bubble/stop" && method == Method.POST -> handleStopBubble()
                 else -> newFixedLengthResponse(
                     Response.Status.NOT_FOUND,
                     "application/json",
@@ -319,6 +322,22 @@ class AutomationService : Service() {
 
         private fun handlePing(): Response {
             return successResponse("pong", "status" to "ok")
+        }
+
+        private fun handleStartBubble(): Response {
+            val intent = Intent(applicationContext, FloatingBubbleService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                applicationContext.startForegroundService(intent)
+            } else {
+                applicationContext.startService(intent)
+            }
+            return successResponse("Floating bubble started")
+        }
+
+        private fun handleStopBubble(): Response {
+            val intent = Intent(applicationContext, FloatingBubbleService::class.java)
+            applicationContext.stopService(intent)
+            return successResponse("Floating bubble stopped")
         }
 
         private fun parseBody(session: IHTTPSession): Map<String, Any> {
