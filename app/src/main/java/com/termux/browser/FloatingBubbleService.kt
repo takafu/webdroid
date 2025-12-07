@@ -32,14 +32,25 @@ import java.io.ByteArrayOutputStream
 
 class FloatingBubbleService : Service() {
 
+    companion object {
+        private var instance: FloatingBubbleService? = null
+
+        // ウィンドウを閉じてバブルモードに戻す
+        fun minimizeWindow() {
+            instance?.minimizeToToBubble()
+        }
+    }
+
     private lateinit var windowManager: WindowManager
     private var bubbleView: View? = null
     private var floatingWindow: View? = null
     private var floatingWindowParams: WindowManager.LayoutParams? = null
+    private var hiddenWebViewContainer: FrameLayout? = null  // バブル状態でWebViewを保持
     private var isExpanded = false
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
         // WebViewを初期化
@@ -48,6 +59,42 @@ class FloatingBubbleService : Service() {
         }
 
         createBubble()
+        createHiddenWebViewContainer()
+    }
+
+    private fun createHiddenWebViewContainer() {
+        // バブル状態でもWebViewを保持するための隠しコンテナ
+        val container = FrameLayout(this).apply {
+            alpha = 0.02f  // ほぼ透明（2%）- 描画を維持するために必要
+        }
+
+        // WebViewを追加
+        BrowserActivity.webView?.let { webView ->
+            (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+            container.addView(webView, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+        }
+
+        val params = WindowManager.LayoutParams(
+            1080,  // スクリーンショット用に十分なサイズ
+            1920,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,  // タッチ不可
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+        }
+
+        hiddenWebViewContainer = container
+        windowManager.addView(container, params)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -528,6 +575,15 @@ class FloatingBubbleService : Service() {
     }
 
     private fun closeFloatingWindow() {
+        // WebViewを隠しコンテナに戻す
+        BrowserActivity.webView?.let { webView ->
+            (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+            hiddenWebViewContainer?.addView(webView, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+        }
+
         // ウィンドウを削除（アニメーション完了後に呼ばれる）
         floatingWindow?.let { window ->
             // 削除前にサイズを0にしてフラッシュを防ぐ
@@ -548,6 +604,14 @@ class FloatingBubbleService : Service() {
 
         // バブルを再表示（シンプルに）
         bubbleView?.visibility = View.VISIBLE
+    }
+
+    // 外部からウィンドウを閉じてバブルモードに戻す（メインスレッドで実行）
+    private fun minimizeToToBubble() {
+        if (!isExpanded) return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            closeFloatingWindow()
+        }
     }
 
     fun captureScreenshot(): String? {
@@ -571,6 +635,13 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // 隠しコンテナを削除
+        hiddenWebViewContainer?.let {
+            it.removeAllViews()
+            windowManager.removeView(it)
+        }
+        hiddenWebViewContainer = null
+
         floatingWindow?.let {
             (it as? LinearLayout)?.let { layout ->
                 (layout.getChildAt(1) as? FrameLayout)?.removeAllViews()

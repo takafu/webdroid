@@ -135,6 +135,7 @@ class AutomationService : Service() {
                 uri == "/ping" && method == Method.GET -> handlePing()
                 uri == "/bubble/start" && method == Method.POST -> handleStartBubble()
                 uri == "/bubble/stop" && method == Method.POST -> handleStopBubble()
+                uri == "/bubble/minimize" && method == Method.POST -> handleMinimizeBubble()
                 else -> newFixedLengthResponse(
                     Response.Status.NOT_FOUND,
                     "application/json",
@@ -210,10 +211,26 @@ class AutomationService : Service() {
             runOnMainThread {
                 synchronized(lock) {
                     val webView = BrowserActivity.webView
-                    if (webView != null && webView.width > 0 && webView.height > 0) {
+                    if (webView != null) {
+                        // WebViewのサイズを取得（バブル状態の場合は保存されたサイズを使用）
+                        var width = webView.width
+                        var height = webView.height
+
+                        // バブル状態（サイズが0）の場合、デフォルトサイズでmeasure/layout
+                        if (width <= 0 || height <= 0) {
+                            width = 1080  // デフォルト幅
+                            height = 1920  // デフォルト高さ
+
+                            webView.measure(
+                                android.view.View.MeasureSpec.makeMeasureSpec(width, android.view.View.MeasureSpec.EXACTLY),
+                                android.view.View.MeasureSpec.makeMeasureSpec(height, android.view.View.MeasureSpec.EXACTLY)
+                            )
+                            webView.layout(0, 0, width, height)
+                        }
+
                         val bitmap = android.graphics.Bitmap.createBitmap(
-                            webView.width,
-                            webView.height,
+                            width,
+                            height,
                             android.graphics.Bitmap.Config.ARGB_8888
                         )
                         val canvas = android.graphics.Canvas(bitmap)
@@ -353,6 +370,11 @@ class AutomationService : Service() {
             val intent = Intent(applicationContext, FloatingBubbleService::class.java)
             applicationContext.stopService(intent)
             return successResponse("Floating bubble stopped")
+        }
+
+        private fun handleMinimizeBubble(): Response {
+            FloatingBubbleService.minimizeWindow()
+            return successResponse("Window minimized to bubble")
         }
 
         private fun parseBody(session: IHTTPSession): Map<String, Any> {
