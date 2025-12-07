@@ -44,8 +44,8 @@ class BrowserActivity : Activity() {
                 builtInZoomControls = true
                 displayZoomControls = false
 
-                // デスクトップUserAgent
-                userAgentString = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                // デスクトップUserAgent（最新Chrome）
+                userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
                 // その他の設定
                 javaScriptCanOpenWindowsAutomatically = true
@@ -56,6 +56,10 @@ class BrowserActivity : Activity() {
                 // Mixed Contentを許可
                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
+                // より本物のブラウザに近づける
+                setSupportMultipleWindows(false)
+                setGeolocationEnabled(false)
+
                 // キャッシュ設定
                 cacheMode = WebSettings.LOAD_DEFAULT
             }
@@ -65,6 +69,13 @@ class BrowserActivity : Activity() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     AutomationService.onPageEvent("page_started", url ?: "")
+
+                    // WebView検出を回避するJavaScriptを注入
+                    view?.evaluateJavascript("""
+                        Object.defineProperty(navigator, 'webdriver', {
+                            get: () => undefined
+                        });
+                    """.trimIndent(), null)
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
