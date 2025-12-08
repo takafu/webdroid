@@ -37,7 +37,7 @@ class FloatingBubbleService : Service() {
     companion object {
         private var instance: FloatingBubbleService? = null
 
-        // ウィンドウを閉じてバブルモードに戻す
+        // Close window and return to bubble mode
         fun minimizeWindow() {
             instance?.minimizeToToBubble()
         }
@@ -49,30 +49,30 @@ class FloatingBubbleService : Service() {
     private var trashParams: WindowManager.LayoutParams? = null
     private var floatingWindow: View? = null
     private var floatingWindowParams: WindowManager.LayoutParams? = null
-    private var hiddenWebViewContainer: FrameLayout? = null  // バブル状態でWebViewを保持
+    private var hiddenWebViewContainer: FrameLayout? = null  // Holds WebView in bubble state
     private var isExpanded = false
-    private var isAnimating = false  // アニメーション中フラグ
+    private var isAnimating = false  // Animation in progress flag
 
-    // ドラッグ用の変数（クロージャでキャプチャするためメンバー変数に）
+    // Drag variables (member vars for closure capture)
     private var windowStartX = 0
     private var windowStartY = 0
 
-    // ウィンドウの位置・サイズを保存（復元用）
+    // Saved window position/size for restoration
     private var savedWindowX: Float? = null
     private var savedWindowY: Float? = null
     private var savedWindowWidth: Int? = null
     private var savedWindowHeight: Int? = null
 
-    // 認証ボタン（ログインフォーム検出時のみ表示）
+    // Auth button (shown only when login form detected)
     private var authButton: View? = null
-    private var hasLoginForm = false  // ログインフォームが検出されたかのフラグ
+    private var hasLoginForm = false  // Login form detected flag
 
     override fun onCreate() {
         super.onCreate()
         instance = this
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        // WebViewを初期化
+        // Initialize WebView
         if (BrowserActivity.webView == null) {
             BrowserActivity.webView = createWebView()
         }
@@ -82,12 +82,12 @@ class FloatingBubbleService : Service() {
     }
 
     private fun createHiddenWebViewContainer() {
-        // バブル状態でもWebViewを保持するための隠しコンテナ
+        // Hidden container to hold WebView even in bubble state
         val container = FrameLayout(this).apply {
-            alpha = 0.02f  // ほぼ透明（2%）- 描画を維持するために必要
+            alpha = 0.02f  // Nearly transparent (2%) - needed to maintain rendering
         }
 
-        // WebViewを追加
+        // Add WebView
         BrowserActivity.webView?.let { webView ->
             (webView.parent as? android.view.ViewGroup)?.removeView(webView)
             container.addView(webView, FrameLayout.LayoutParams(
@@ -97,14 +97,14 @@ class FloatingBubbleService : Service() {
         }
 
         val params = WindowManager.LayoutParams(
-            1080,  // スクリーンショット用に十分なサイズ
+            1080,  // Large enough for screenshots
             1920,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else
                 WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,  // タッチ不可
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,  // Not touchable
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -120,44 +120,31 @@ class FloatingBubbleService : Service() {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun createBubble() {
-        // バブル（丸いぽっち）を作成 - グラデーション＋シャドウ＋アニメーション
-        val bubble = TextView(this).apply {
-            text = "🌐"
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            includeFontPadding = false
+        // Create bubble with gradient, shadow, and animation
+        // Icon: Feather Icons "globe" (https://feathericons.com/)
+        val bubble = ImageView(this).apply {
+            setImageResource(R.drawable.ic_globe)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
 
-            // 自動サイズ調整 - 原理的にはみ出ないように
-            setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM)
-            // 最小〜最大サイズの範囲を指定（単位: sp）
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                setAutoSizeTextTypeUniformWithConfiguration(
-                    20, // 最小サイズ (sp)
-                    60, // 最大サイズ (sp)
-                    1,  // ステップ (sp)
-                    android.util.TypedValue.COMPLEX_UNIT_SP
-                )
-            }
-
-            // パディングを設定してバブルの境界内に収める
-            val padding = 12
+            // Padding for proper icon sizing
+            val padding = 28
             setPadding(padding, padding, padding, padding)
 
-            // グラデーション背景（紫→青のモダンなグラデーション）
+            // Gradient background (purple to blue)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 colors = intArrayOf(
-                    Color.parseColor("#667eea"), // 明るい紫
-                    Color.parseColor("#764ba2")  // 深い紫
+                    Color.parseColor("#667eea"), // Light purple
+                    Color.parseColor("#764ba2")  // Deep purple
                 )
                 gradientType = GradientDrawable.LINEAR_GRADIENT
                 orientation = GradientDrawable.Orientation.TL_BR
             }
 
-            // エレベーション（影）を追加
+            // Add elevation (shadow)
             elevation = 16f
 
-            // パルスアニメーションを開始
+            // Start pulse animation
             startPulseAnimation()
         }
 
@@ -183,30 +170,25 @@ class FloatingBubbleService : Service() {
         var velocityTracker: VelocityTracker? = null
         var isDragging = false
 
-        // ゴミ箱を作成（バブルと同じ描画方法）
+        // Create trash (same style as bubble)
+        // Icon: Feather Icons "trash-2" (https://feathericons.com/)
         val trashSize = 130
-        val trash = TextView(this).apply {
-            text = "🗑️"
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_UNIFORM)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                setAutoSizeTextTypeUniformWithConfiguration(20, 60, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
-            }
-            val padding = 12
+        val trash = ImageView(this).apply {
+            setImageResource(R.drawable.ic_trash)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            val padding = 28
             setPadding(padding, padding, padding, padding)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 colors = intArrayOf(
-                    Color.parseColor("#5a5a5a"),  // グレー
-                    Color.parseColor("#3a3a3a")   // ダークグレー
+                    Color.parseColor("#5a5a5a"),  // Gray
+                    Color.parseColor("#3a3a3a")   // Dark gray
                 )
                 gradientType = GradientDrawable.LINEAR_GRADIENT
                 orientation = GradientDrawable.Orientation.TL_BR
             }
             elevation = 16f
-            alpha = 0f  // 初期は非表示
+            alpha = 0f  // Initially hidden
             scaleX = 0.5f
             scaleY = 0.5f
         }
@@ -242,12 +224,12 @@ class FloatingBubbleService : Service() {
                     initialTouchY = event.rawY
                     isDragging = false
 
-                    // VelocityTracker初期化
+                    // Initialize VelocityTracker
                     velocityTracker?.recycle()
                     velocityTracker = VelocityTracker.obtain()
                     velocityTracker?.addMovement(event)
 
-                    // タップ時に縮小アニメーション
+                    // Scale down animation on tap
                     v.animate()
                         .scaleX(0.85f)
                         .scaleY(0.85f)
@@ -261,10 +243,10 @@ class FloatingBubbleService : Service() {
                     val deltaX = Math.abs(event.rawX - initialTouchX)
                     val deltaY = Math.abs(event.rawY - initialTouchY)
 
-                    // ドラッグ開始判定
+                    // Detect drag start
                     if (!isDragging && (deltaX > 10 || deltaY > 10)) {
                         isDragging = true
-                        // ゴミ箱を表示
+                        // Show trash
                         trash.animate()
                             .alpha(1f)
                             .scaleX(1f)
@@ -277,19 +259,19 @@ class FloatingBubbleService : Service() {
                     params.y = initialY + (event.rawY - initialTouchY).toInt()
                     windowManager.updateViewLayout(v, params)
 
-                    // ゴミ箱との距離チェック
+                    // Check distance to trash
                     if (isDragging) {
-                        val bubbleCenterX = screenWidth - params.x - 65  // バブルの中心X
-                        val bubbleCenterY = params.y + 65  // バブルの中心Y
+                        val bubbleCenterX = screenWidth - params.x - 65  // Bubble center X
+                        val bubbleCenterY = params.y + 65  // Bubble center Y
                         val trashCenterX = screenWidth / 2
-                        val trashCenterY = screenHeight - 100 - 65  // ゴミ箱の中心Y
+                        val trashCenterY = screenHeight - 100 - 65  // Trash center Y
 
                         val distance = Math.sqrt(
                             Math.pow((bubbleCenterX - trashCenterX).toDouble(), 2.0) +
                             Math.pow((bubbleCenterY - trashCenterY).toDouble(), 2.0)
                         )
 
-                        // 近づくとゴミ箱を拡大（即座に切り替え）
+                        // Scale up trash when near (instant switch)
                         val isNear = distance < 200
                         if (isNear && trash.scaleX < 1.2f) {
                             trash.animate()
@@ -315,14 +297,14 @@ class FloatingBubbleService : Service() {
                     velocityTracker?.recycle()
                     velocityTracker = null
 
-                    // 元のサイズに戻す
+                    // Restore original size
                     v.animate()
                         .scaleX(1f)
                         .scaleY(1f)
                         .setDuration(150)
                         .start()
 
-                    // ゴミ箱にドロップされたかチェック
+                    // Check if dropped on trash
                     val bubbleCenterX = screenWidth - params.x - 65
                     val bubbleCenterY = params.y + 65
                     val trashCenterX = screenWidth / 2
@@ -334,10 +316,10 @@ class FloatingBubbleService : Service() {
                     )
 
                     if (isDragging && distance < 200) {
-                        // ゴミ箱に吸い込まれる
+                        // Animate into trash
                         animateToTrash(v, params, trash, screenWidth, screenHeight)
                     } else if (!isDragging) {
-                        // タップ - ウィンドウを開く
+                        // Tap - open window
                         v.animate()
                             .scaleX(1.1f)
                             .scaleY(1.1f)
@@ -352,7 +334,7 @@ class FloatingBubbleService : Service() {
                             .start()
                         openFloatingWindow()
                     } else {
-                        // 慣性アニメーション（ゴミ箱は表示したまま）
+                        // Fling animation (keep trash visible)
                         applyFlingAnimation(v, params, trash, velocityX, velocityY, screenWidth, screenHeight)
                     }
                     true
@@ -365,7 +347,7 @@ class FloatingBubbleService : Service() {
         windowManager.addView(bubble, params)
     }
 
-    // ゴミ箱に吸い込まれるアニメーション
+    // Animation when sucked into trash
     private fun animateToTrash(
         bubble: View,
         params: WindowManager.LayoutParams,
@@ -373,11 +355,11 @@ class FloatingBubbleService : Service() {
         screenWidth: Int,
         screenHeight: Int
     ) {
-        // ゴミ箱の中心座標（画面下部中央）
+        // Trash center coordinates (bottom center of screen)
         val trashCenterX = screenWidth / 2
         val trashCenterY = screenHeight - 100 - 65
 
-        // バブルの現在の中心座標
+        // Current bubble center coordinates
         val startX = screenWidth - params.x - 65
         val startY = params.y + 65
 
@@ -386,7 +368,7 @@ class FloatingBubbleService : Service() {
             interpolator = AccelerateDecelerateInterpolator()
             addUpdateListener { animator ->
                 val t = animator.animatedValue as Float
-                // バブルをゴミ箱中心に向かって移動
+                // Move bubble toward trash center
                 val newCenterX = startX + (trashCenterX - startX) * t
                 val newCenterY = startY + (trashCenterY - startY) * t
                 params.x = (screenWidth - newCenterX - 65).toInt()
@@ -400,7 +382,7 @@ class FloatingBubbleService : Service() {
             addListener(object : android.animation.Animator.AnimatorListener {
                 override fun onAnimationStart(a: android.animation.Animator) {}
                 override fun onAnimationEnd(a: android.animation.Animator) {
-                    // ゴミ箱が反応して消える
+                    // Trash reacts and disappears
                     trash.animate()
                         .scaleX(1.3f)
                         .scaleY(1.3f)
@@ -430,7 +412,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 慣性アニメーション（ゴミ箱判定付き）
+    // Fling animation with trash detection
     private fun applyFlingAnimation(
         view: View,
         params: WindowManager.LayoutParams,
@@ -456,7 +438,7 @@ class FloatingBubbleService : Service() {
                 params.x = (params.x + vx).toInt().coerceIn(0, screenWidth - 130)
                 params.y = (params.y + vy).toInt().coerceIn(0, screenHeight - 130)
 
-                // ゴミ箱との距離チェック
+                // Check distance to trash
                 val bubbleCenterX = screenWidth - params.x - 65
                 val bubbleCenterY = params.y + 65
                 val distance = Math.sqrt(
@@ -464,7 +446,7 @@ class FloatingBubbleService : Service() {
                     Math.pow((bubbleCenterY - trashCenterY).toDouble(), 2.0)
                 )
 
-                // ゴミ箱に近づいたらスケール変更（即座に切り替え）
+                // Scale trash when near (instant switch)
                 val isNear = distance < 200
                 if (isNear && trash.scaleX < 1.2f) {
                     trash.animate()
@@ -480,7 +462,7 @@ class FloatingBubbleService : Service() {
                         .start()
                 }
 
-                // ゴミ箱に十分近づいたら吸い込み
+                // Suck into trash when close enough
                 if (distance < 120) {
                     cancel()
                     animateToTrash(view, params, trash, screenWidth, screenHeight)
@@ -496,7 +478,7 @@ class FloatingBubbleService : Service() {
             addListener(object : android.animation.Animator.AnimatorListener {
                 override fun onAnimationStart(a: android.animation.Animator) {}
                 override fun onAnimationEnd(a: android.animation.Animator) {
-                    // 慣性終了後にゴミ箱を非表示
+                    // Hide trash after fling ends
                     trash.animate()
                         .alpha(0f)
                         .scaleX(0.5f)
@@ -511,7 +493,7 @@ class FloatingBubbleService : Service() {
         animator.start()
     }
 
-    // パルスアニメーション（生きている感じを演出）
+    // Pulse animation (gives a lively feel)
     private fun View.startPulseAnimation() {
         val scaleUp = ObjectAnimator.ofFloat(this, "scaleX", 1f, 1.08f).apply {
             duration = 1500
@@ -534,10 +516,10 @@ class FloatingBubbleService : Service() {
     private fun openFloatingWindow() {
         if (floatingWindow != null) return
 
-        // バブルを即座に非表示（シームレスな変形のため）
+        // Hide bubble immediately (for seamless transformation)
         bubbleView?.visibility = View.INVISIBLE
 
-        // ラッパー（画面全体サイズ、クリッピング無効）
+        // Wrapper (full screen size, clipping disabled)
         val wrapper = FrameLayout(this).apply {
             clipChildren = false
             clipToPadding = false
@@ -545,16 +527,16 @@ class FloatingBubbleService : Service() {
 
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            // 全体を角丸に
+            // Rounded corners for the whole container
             background = GradientDrawable().apply {
                 setColor(Color.WHITE)
                 cornerRadius = 24f
             }
             elevation = 24f
-            clipToOutline = true  // 子要素も角丸の境界でクリップ
+            clipToOutline = true  // Clip children to rounded outline
         }
 
-        // ヘッダー（ミニマイズボタン）- グラデーション背景
+        // Header with minimize button - gradient background
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -572,7 +554,7 @@ class FloatingBubbleService : Service() {
         }
 
         val title = TextView(this).apply {
-            text = "🌐 Browser Automation"
+            text = "Browser Automation"
             setTextColor(Color.WHITE)
             textSize = 16f
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -583,49 +565,44 @@ class FloatingBubbleService : Service() {
             )
         }
 
-        // 認証ボタン（パスワードマネージャー連携）- ログインフォーム検出時のみ表示
-        val authBtn = TextView(this).apply {
-            text = "🔐"
-            setTextColor(Color.WHITE)
-            textSize = 18f
-            gravity = Gravity.CENTER
-            val btnSize = 48
+        // Auth button (password manager) - shown only when login form detected
+        // Icon: Feather Icons "lock" (https://feathericons.com/)
+        val authBtn = ImageView(this).apply {
+            setImageResource(R.drawable.ic_lock)
+            val btnSize = 64
+            val padding = 16
             layoutParams = LinearLayout.LayoutParams(btnSize, btnSize).apply {
                 marginEnd = 8
             }
+            setPadding(padding, padding, padding, padding)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 setColor(Color.parseColor("#33FFFFFF"))
             }
-            // hasLoginFormフラグに基づいて初期表示を決定
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            // Initial visibility based on hasLoginForm flag
             visibility = if (hasLoginForm) View.VISIBLE else View.GONE
             setOnClickListener {
                 showAuthDialog()
             }
         }
-        authButton = authBtn  // メンバー変数に保存
+        authButton = authBtn  // Save to member variable
 
-        // ミニマイズボタン（丸の中に小さな丸）
-        val minimizeButton = View(this).apply {
-            val btnSize = 56
+        // Minimize button
+        // Icon: Feather Icons "minus" (https://feathericons.com/)
+        val minimizeButton = ImageView(this).apply {
+            setImageResource(R.drawable.ic_minus)
+            val btnSize = 64
+            val padding = 16
             layoutParams = LinearLayout.LayoutParams(btnSize, btnSize)
-            // 外側の半透明丸 + 内側の白丸をレイヤーで描画
-            background = android.graphics.drawable.LayerDrawable(arrayOf(
-                GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(Color.parseColor("#33FFFFFF"))
-                },
-                GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(Color.WHITE)
-                }
-            )).apply {
-                // 内側の丸を中央に小さく配置
-                val inset = 20
-                setLayerInset(1, inset, inset, inset, inset)
+            setPadding(padding, padding, padding, padding)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#33FFFFFF"))
             }
+            scaleType = ImageView.ScaleType.FIT_CENTER
             setOnClickListener {
-                // アニメーション中は無視
+                // Ignore during animation
                 if (isAnimating) return@setOnClickListener
 
                 val params = floatingWindowParams ?: return@setOnClickListener
@@ -633,15 +610,15 @@ class FloatingBubbleService : Service() {
 
                 isAnimating = true
 
-                // 閉じる時のアニメーション - バブルの位置に向かって縮小
+                // Close animation - shrink toward bubble position
                 val bubbleParams = bubbleView?.layoutParams as? WindowManager.LayoutParams
                 val bubbleSize = 130f
 
-                // containerの現在のサイズ
+                // Current container size
                 val currentWidth = container.width.toFloat()
                 val currentHeight = container.height.toFloat()
 
-                // ウィンドウの位置・サイズを保存（windowParamsから取得）
+                // Save window position/size from windowParams
                 savedWindowX = params.x.toFloat()
                 savedWindowY = params.y.toFloat()
                 savedWindowWidth = currentWidth.toInt()
@@ -653,12 +630,12 @@ class FloatingBubbleService : Service() {
                     return@setOnClickListener
                 }
 
-                // wrapperをフルスクリーンに戻す（アニメーション用）
-                // 1. containerのtranslationを設定（見た目位置を維持）
+                // Expand wrapper to full screen (for animation)
+                // 1. Set container translation (maintain visual position)
                 container.translationX = params.x.toFloat()
                 container.translationY = params.y.toFloat()
 
-                // 2. wrapperをフルスクリーンに
+                // 2. Make wrapper full screen
                 val screenWidth = resources.displayMetrics.widthPixels
                 val screenHeight = resources.displayMetrics.heightPixels
                 params.x = 0
@@ -670,15 +647,15 @@ class FloatingBubbleService : Service() {
                 val scaleXEnd = bubbleSize / currentWidth
                 val scaleYEnd = bubbleSize / currentHeight
 
-                // バブルの位置を計算
+                // Calculate bubble position
                 val bubbleCenterX = screenWidth - (bubbleParams?.x ?: 50) - bubbleSize / 2f
                 val bubbleCenterY = (bubbleParams?.y ?: 200) + bubbleSize / 2f
 
-                // バブルの中心に移動するためのtranslation（pivotが中心なので、左上座標を計算）
+                // Translation to move to bubble center (calculate top-left from center pivot)
                 val targetTranslationX = bubbleCenterX - currentWidth / 2f
                 val targetTranslationY = bubbleCenterY - currentHeight / 2f
 
-                // pivotを中心に設定
+                // Set pivot to center
                 container.pivotX = currentWidth / 2f
                 container.pivotY = currentHeight / 2f
 
@@ -690,7 +667,7 @@ class FloatingBubbleService : Service() {
                     .alpha(0f)
                     .setDuration(250)
                     .setInterpolator(AccelerateDecelerateInterpolator())
-                    .setListener(null)  // 開くアニメのリスナーをクリア
+                    .setListener(null)  // Clear open animation listener
                     .withEndAction {
                         isAnimating = false
                         closeFloatingWindow()
@@ -704,12 +681,12 @@ class FloatingBubbleService : Service() {
         header.addView(minimizeButton)
         container.addView(header)
 
-        // タイトルバーのドラッグ処理
+        // Title bar drag handling
         var dragStartX = 0f
         var dragStartY = 0f
 
         header.setOnTouchListener { _, event ->
-            // アニメーション中はドラッグ無効
+            // Disable drag during animation
             if (isAnimating) return@setOnTouchListener false
 
             val params = floatingWindowParams ?: return@setOnTouchListener false
@@ -733,7 +710,7 @@ class FloatingBubbleService : Service() {
             }
         }
 
-        // WebViewコンテナ - 内側にパディング
+        // WebView container with inner padding
         val webViewContainer = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -744,7 +721,7 @@ class FloatingBubbleService : Service() {
             setBackgroundColor(Color.parseColor("#f8f9fa"))
         }
 
-        // WebViewを作成または再利用
+        // Create or reuse WebView
         if (BrowserActivity.webView == null) {
             BrowserActivity.webView = createWebView()
         }
@@ -756,46 +733,52 @@ class FloatingBubbleService : Service() {
 
         container.addView(webViewContainer)
 
-        // リサイズハンドル（右下角）
+        // Resize handle (bottom right) - same gradient as header
         val resizeHandle = View(this).apply {
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#667eea"))
-                cornerRadius = 8f
+                colors = intArrayOf(
+                    Color.parseColor("#667eea"),
+                    Color.parseColor("#764ba2")
+                )
+                gradientType = GradientDrawable.LINEAR_GRADIENT
+                orientation = GradientDrawable.Orientation.LEFT_RIGHT
+                // Bottom right corner radius (match container)
+                cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, 24f, 24f, 0f, 0f)
             }
-            layoutParams = LinearLayout.LayoutParams(56, 56).apply {
+            layoutParams = LinearLayout.LayoutParams(72, 40).apply {
                 gravity = Gravity.END
             }
         }
         container.addView(resizeHandle)
 
-        // バブルの位置を取得
+        // Get bubble position
         val bubbleParams = bubbleView?.layoutParams as? WindowManager.LayoutParams
         val bubbleSize = 130
 
-        // 画面サイズ
+        // Screen size
         val screenWidth = resources.displayMetrics.widthPixels
         val screenHeight = resources.displayMetrics.heightPixels
 
-        // ウィンドウのサイズ（保存されていれば復元、なければデフォルト）
+        // Window size (restore if saved, otherwise default)
         val finalWidth = savedWindowWidth ?: (screenWidth * 0.95).toInt()
         val finalHeight = savedWindowHeight ?: (screenHeight * 0.45).toInt()
 
-        // バブルの中心座標
+        // Bubble center coordinates
         val bubbleCenterX = screenWidth - (bubbleParams?.x ?: 50) - bubbleSize / 2
         val bubbleCenterY = (bubbleParams?.y ?: 200) + bubbleSize / 2
 
-        // containerの位置（保存されていれば復元、なければ上部中央に配置）
-        val margin = (screenWidth * 0.025).toInt()  // 左右に2.5%の余白
+        // Container position (restore if saved, otherwise top center)
+        val margin = (screenWidth * 0.025).toInt()  // 2.5% margin on sides
         val initialX = savedWindowX ?: margin.toFloat()
         val initialY = savedWindowY ?: margin.toFloat()
 
-        // containerのサイズを設定（位置はtranslationで管理）
+        // Set container size (position managed via translation)
         container.layoutParams = FrameLayout.LayoutParams(finalWidth, finalHeight)
 
-        // wrapperにcontainerを追加
+        // Add container to wrapper
         wrapper.addView(container)
 
-        // wrapperを画面全体サイズでWindowManagerに追加
+        // Add wrapper to WindowManager at full screen size
         val windowParams = WindowManager.LayoutParams(
             screenWidth,
             screenHeight,
@@ -813,7 +796,7 @@ class FloatingBubbleService : Service() {
             y = 0
             windowAnimations = 0
 
-            // PRIVATE_FLAG_NO_MOVE_ANIMATION をリフレクションで設定
+            // Set PRIVATE_FLAG_NO_MOVE_ANIMATION via reflection
             try {
                 val privateFlagsField = WindowManager.LayoutParams::class.java.getField("privateFlags")
                 val noAnimField = WindowManager.LayoutParams::class.java.getField("PRIVATE_FLAG_NO_MOVE_ANIMATION")
@@ -830,40 +813,40 @@ class FloatingBubbleService : Service() {
         windowManager.addView(wrapper, windowParams)
         isExpanded = true
 
-        // ウィンドウ外タップでフォーカス解放
+        // Release focus on tap outside window
         wrapper.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_OUTSIDE) {
-                // フォーカスを解放（FLAG_NOT_FOCUSABLEを追加）
+                // Release focus (add FLAG_NOT_FOCUSABLE)
                 windowParams.flags = windowParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 windowManager.updateViewLayout(wrapper, windowParams)
             }
             false
         }
 
-        // WebViewタップでフォーカス取得
+        // Get focus on WebView tap
         BrowserActivity.webView?.setOnTouchListener { view, event ->
             if (event.action == MotionEvent.ACTION_DOWN) {
-                // フォーカスを取得（FLAG_NOT_FOCUSABLEを削除）
+                // Get focus (remove FLAG_NOT_FOCUSABLE)
                 val hasFocusFlag = (windowParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
                 if (hasFocusFlag) {
                     windowParams.flags = windowParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
                     windowManager.updateViewLayout(wrapper, windowParams)
                 }
-                // WebViewにフォーカスをリクエスト
+                // Request focus for WebView
                 view.requestFocus()
             }
-            // falseを返してWebViewのタッチ処理を継続
+            // Return false to continue WebView touch handling
             false
         }
 
-        // ローカル関数：wrapperをUIサイズに縮小（開くアニメ完了時）
+        // Local function: shrink wrapper to UI size (when open animation ends)
         val shrinkWrapperToUI = {
             val winX = container.translationX.toInt()
             val winY = container.translationY.toInt()
             val winW = container.width
             val winH = container.height
 
-            // translationを先にリセットしてからwrapperを更新
+            // Reset translation first, then update wrapper
             container.translationX = 0f
             container.translationY = 0f
             windowParams.x = winX
@@ -872,18 +855,18 @@ class FloatingBubbleService : Service() {
             windowParams.height = winH
             windowManager.updateViewLayout(wrapper, windowParams)
 
-            // デフォルトは85%透過
+            // Default 85% opacity
             container.alpha = 0.85f
         }
 
-        // リサイズハンドルのドラッグ処理
+        // Resize handle drag handling
         var resizeStartX = 0f
         var resizeStartY = 0f
         var startWidth = 0
         var startHeight = 0
 
         resizeHandle.setOnTouchListener { _, event ->
-            // アニメーション中はリサイズ無効
+            // Disable resize during animation
             if (isAnimating) return@setOnTouchListener false
 
             val params = floatingWindowParams ?: return@setOnTouchListener false
@@ -901,14 +884,14 @@ class FloatingBubbleService : Service() {
                     val deltaX = event.rawX - resizeStartX
                     val deltaY = event.rawY - resizeStartY
 
-                    // 最小サイズを設定
+                    // Set minimum size
                     val minWidth = 300
                     val minHeight = 400
 
                     val newWidth = maxOf(minWidth, (startWidth + deltaX).toInt())
                     val newHeight = maxOf(minHeight, (startHeight + deltaY).toInt())
 
-                    // containerとwrapper両方のサイズを更新
+                    // Update both container and wrapper size
                     container.layoutParams = FrameLayout.LayoutParams(newWidth, newHeight)
                     params.width = newWidth
                     params.height = newHeight
@@ -919,26 +902,26 @@ class FloatingBubbleService : Service() {
             }
         }
 
-        // WebViewコンテナを最初は透明に
+        // WebView container initially transparent
         webViewContainer.alpha = 0f
 
-        // バブルのサイズから開始（円形→ウィンドウ）
+        // Start from bubble size (circle -> window)
         val scaleXStart = bubbleSize.toFloat() / finalWidth
         val scaleYStart = bubbleSize.toFloat() / finalHeight
 
-        // containerの最終中心座標（translationベース）
+        // Container final center coordinates (translation based)
         val finalCenterX = initialX + finalWidth / 2f
         val finalCenterY = initialY + finalHeight / 2f
 
-        // pivotをcontainerの中心に設定
+        // Set pivot to container center
         container.pivotX = finalWidth / 2f
         container.pivotY = finalHeight / 2f
 
-        // 開始位置：バブルの中心に合わせる
+        // Start position: align with bubble center
         val startTranslationX = bubbleCenterX - finalWidth / 2f
         val startTranslationY = bubbleCenterY - finalHeight / 2f
 
-        // 前のViewPropertyAnimatorをキャンセル（閉じるアニメのリスナーが残っている可能性）
+        // Cancel previous ViewPropertyAnimator (close animation listener may remain)
         container.animate().cancel()
         container.animate().setListener(null)
 
@@ -948,10 +931,10 @@ class FloatingBubbleService : Service() {
         container.translationX = startTranslationX
         container.translationY = startTranslationY
 
-        // アニメーション中フラグを立てる
+        // Set animation in progress flag
         isAnimating = true
 
-        // レイアウト確定後にアニメーション開始
+        // Start animation after layout is finalized
         wrapper.post {
             ValueAnimator.ofFloat(0f, 1f).apply {
                 duration = 350
@@ -978,7 +961,7 @@ class FloatingBubbleService : Service() {
             }
         }
 
-        // WebViewを中間（175ms後）からフェードイン
+        // Fade in WebView from midpoint (after 175ms)
         webViewContainer.postDelayed({
             webViewContainer.animate()
                 .alpha(1f)
@@ -994,62 +977,62 @@ class FloatingBubbleService : Service() {
                 domStorageEnabled = true
                 databaseEnabled = true
 
-                // デスクトップモード設定
+                // Desktop mode settings
                 useWideViewPort = true
                 loadWithOverviewMode = true
                 setSupportZoom(true)
                 builtInZoomControls = true
                 displayZoomControls = false
 
-                // ビューポートを大きく設定してデスクトップレイアウトを強制
+                // Force desktop layout with large viewport
                 layoutAlgorithm = android.webkit.WebSettings.LayoutAlgorithm.NORMAL
 
-                // デスクトップUserAgent（最新Chrome）
+                // Desktop UserAgent (latest Chrome)
                 userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
-                // その他の設定
+                // Other settings
                 javaScriptCanOpenWindowsAutomatically = true
                 mediaPlaybackRequiresUserGesture = false
                 allowFileAccess = true
                 allowContentAccess = true
 
-                // Mixed Contentを許可
+                // Allow mixed content
                 mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
-                // より本物のブラウザに近づける
+                // Make it more like a real browser
                 setSupportMultipleWindows(false)
                 setGeolocationEnabled(false)
 
-                // キャッシュ設定
+                // Cache settings
                 cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
 
-                // フォームデータ保存（パスワードマネージャー連携に必要な場合がある）
+                // Save form data (may be needed for password manager integration)
                 @Suppress("DEPRECATION")
                 setSaveFormData(true)
                 @Suppress("DEPRECATION")
                 setSavePassword(true)
             }
 
-            // デバッグ有効化
+            // Enable debugging
             WebView.setWebContentsDebuggingEnabled(true)
 
-            // フォーカス設定
+            // Focus settings
             isFocusable = true
             isFocusableInTouchMode = true
             requestFocus(View.FOCUS_DOWN)
 
-            // WebViewClient設定
+            // WebViewClient setup
             webViewClient = object : android.webkit.WebViewClient() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     AutomationService.onPageEvent("page_started", url ?: "")
 
-                    // ページ読み込み開始時に認証ボタンを非表示
+                    // Hide auth button when page starts loading
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         authButton?.visibility = View.GONE
                     }
 
-                    // WebView検出を回避するJavaScriptを注入
+                    // Inject JavaScript to avoid WebView detection
                     view?.evaluateJavascript("""
                         Object.defineProperty(navigator, 'webdriver', {
                             get: () => undefined
@@ -1061,7 +1044,7 @@ class FloatingBubbleService : Service() {
                     super.onPageFinished(view, url)
                     AutomationService.onPageEvent("page_finished", url ?: "")
 
-                    // ログインフォームを検出して認証ボタンの表示/非表示を切り替え
+                    // Detect login form and toggle auth button visibility
                     detectLoginForm(view)
                 }
 
@@ -1075,7 +1058,7 @@ class FloatingBubbleService : Service() {
                 }
             }
 
-            // WebChromeClient設定
+            // WebChromeClient setup
             webChromeClient = object : android.webkit.WebChromeClient() {
                 override fun onConsoleMessage(message: android.webkit.ConsoleMessage?): Boolean {
                     message?.let {
@@ -1097,7 +1080,7 @@ class FloatingBubbleService : Service() {
     }
 
     private fun closeFloatingWindow() {
-        // WebViewを隠しコンテナに戻す
+        // Move WebView back to hidden container
         BrowserActivity.webView?.let { webView ->
             (webView.parent as? android.view.ViewGroup)?.removeView(webView)
             hiddenWebViewContainer?.addView(webView, FrameLayout.LayoutParams(
@@ -1106,9 +1089,9 @@ class FloatingBubbleService : Service() {
             ))
         }
 
-        // ウィンドウを削除（アニメーション完了後に呼ばれる）
+        // Remove window (called after animation completes)
         floatingWindow?.let { window ->
-            // 削除前にサイズを0にしてフラッシュを防ぐ
+            // Set size to 0 before removing to prevent flash
             val params = window.layoutParams as? WindowManager.LayoutParams
             params?.let {
                 it.width = 0
@@ -1116,7 +1099,7 @@ class FloatingBubbleService : Service() {
                 windowManager.updateViewLayout(window, it)
             }
 
-            // 次のフレームで削除
+            // Remove on next frame
             window.post {
                 windowManager.removeView(window)
                 floatingWindow = null
@@ -1124,11 +1107,11 @@ class FloatingBubbleService : Service() {
         }
         isExpanded = false
 
-        // バブルを再表示（シンプルに）
+        // Show bubble again
         bubbleView?.visibility = View.VISIBLE
     }
 
-    // 外部からウィンドウを閉じてバブルモードに戻す（メインスレッドで実行）
+    // Close window and return to bubble mode (run on main thread)
     private fun minimizeToToBubble() {
         if (!isExpanded) return
         android.os.Handler(android.os.Looper.getMainLooper()).post {
@@ -1136,12 +1119,12 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // 認証ダイアログを表示
+    // Show auth dialog
     private fun showAuthDialog() {
-        // 現在のURLを取得
+        // Get current URL
         val currentUrl = BrowserActivity.webView?.url ?: ""
 
-        // ウィンドウの位置・サイズを保存してミニマイズ
+        // Save window position/size before minimizing
         floatingWindowParams?.let { params ->
             savedWindowX = params.x.toFloat()
             savedWindowY = params.y.toFloat()
@@ -1154,7 +1137,7 @@ class FloatingBubbleService : Service() {
             }
         }
 
-        // 全てのオーバーレイをWindowManagerから一時的に削除（Bitwardenのタッチを妨げないように）
+        // Temporarily remove all overlays from WindowManager (so Bitwarden can receive touches)
         try {
             floatingWindow?.let { windowManager.removeView(it) }
         } catch (e: Exception) {}
@@ -1168,18 +1151,18 @@ class FloatingBubbleService : Service() {
             hiddenWebViewContainer?.let { windowManager.removeView(it) }
         } catch (e: Exception) {}
 
-        // コールバックを設定
+        // Set callbacks
         AuthDialogActivity.onCredentialsEntered = { username, password ->
-            // WebViewに認証情報を注入
+            // Inject credentials into WebView
             injectCredentials(username, password)
         }
 
-        // ダイアログ終了時にオーバーレイを再追加
+        // Re-add overlays when dialog closes
         AuthDialogActivity.onDialogClosed = {
             restoreOverlays()
         }
 
-        // AuthDialogActivityを起動（URLを渡す）
+        // Launch AuthDialogActivity (pass URL)
         val intent = android.content.Intent(this, AuthDialogActivity::class.java).apply {
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             putExtra("url", currentUrl)
@@ -1187,7 +1170,7 @@ class FloatingBubbleService : Service() {
         startActivity(intent)
     }
 
-    // フローティングウィンドウを再表示
+    // Show floating window again
     private fun reopenFloatingWindow() {
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             bubbleView?.visibility = View.INVISIBLE
@@ -1195,10 +1178,10 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // オーバーレイを再追加（認証ダイアログ終了後）
+    // Re-add overlays (after auth dialog closes)
     private fun restoreOverlays() {
         android.os.Handler(android.os.Looper.getMainLooper()).post {
-            // hiddenWebViewContainerを再追加
+            // Re-add hiddenWebViewContainer
             hiddenWebViewContainer?.let { container ->
                 val params = WindowManager.LayoutParams(
                     1080,
@@ -1220,7 +1203,7 @@ class FloatingBubbleService : Service() {
                 } catch (e: Exception) {}
             }
 
-            // trashViewを再追加
+            // Re-add trashView
             trashView?.let { trash ->
                 trashParams?.let { params ->
                     try {
@@ -1229,7 +1212,7 @@ class FloatingBubbleService : Service() {
                 }
             }
 
-            // bubbleViewを再追加（非表示状態で）
+            // Re-add bubbleView (in hidden state)
             bubbleView?.let { bubble ->
                 val bubbleParams = WindowManager.LayoutParams(
                     130, 130,
@@ -1251,10 +1234,10 @@ class FloatingBubbleService : Service() {
                 } catch (e: Exception) {}
             }
 
-            // floatingWindowを再追加
+            // Re-add floatingWindow
             floatingWindow?.let { window ->
                 floatingWindowParams?.let { params ->
-                    // 保存した位置・サイズを復元
+                    // Restore saved position/size
                     savedWindowX?.let { params.x = it.toInt() }
                     savedWindowY?.let { params.y = it.toInt() }
                     savedWindowWidth?.let { params.width = it }
@@ -1269,7 +1252,7 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // WebViewに認証情報を注入
+    // Inject credentials into WebView
     private fun injectCredentials(username: String, password: String) {
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             val escapedUsername = username.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
@@ -1277,7 +1260,7 @@ class FloatingBubbleService : Service() {
 
             val script = """
                 (function() {
-                    // ユーザー名/メールフィールドを探す
+                    // Find username/email field
                     var usernameSelectors = [
                         'input[type="text"][name*="user"]',
                         'input[type="text"][name*="login"]',
@@ -1300,10 +1283,10 @@ class FloatingBubbleService : Service() {
                         if (usernameField) break;
                     }
 
-                    // パスワードフィールドを探す
+                    // Find password field
                     var passwordField = document.querySelector('input[type="password"]');
 
-                    // 値を設定してイベントを発火
+                    // Set value and trigger events
                     function setValueAndTrigger(field, value) {
                         if (!field) return;
                         field.focus();
@@ -1332,15 +1315,15 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    // ログインフォームを検出して認証ボタンの表示/非表示を切り替え
+    // Detect login form and toggle auth button visibility
     private fun detectLoginForm(view: WebView?) {
         val script = """
             (function() {
-                // パスワードフィールドがあるかチェック
+                // Check for password field
                 var passwordField = document.querySelector('input[type="password"]');
                 if (passwordField) return true;
 
-                // ログインフォームっぽい要素をチェック
+                // Check for login form-like elements
                 var loginIndicators = [
                     'input[name*="login"]',
                     'input[name*="user"]',
@@ -1393,7 +1376,7 @@ class FloatingBubbleService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // 隠しコンテナを削除
+        // Remove hidden container
         hiddenWebViewContainer?.let {
             it.removeAllViews()
             windowManager.removeView(it)

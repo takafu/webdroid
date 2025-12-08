@@ -1,5 +1,5 @@
 <!--
-    Feather Icons - globe
+    Feather Icons - trash-2
     https://feathericons.com/
     MIT License: https://github.com/feathericons/feather/blob/master/LICENSE
 -->
@@ -9,21 +9,28 @@
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:pathData="M12,12m-10,0a10,10 0,1 1,20 0a10,10 0,1 1,-20 0"
+        android:pathData="M3,6L5,6L21,6"
         android:strokeWidth="2"
         android:strokeColor="#FFFFFF"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000"/>
     <path
-        android:pathData="M2,12L22,12"
+        android:pathData="M19,6L19,20C19,21.1 18.1,22 17,22L7,22C5.9,22 5,21.1 5,20L5,6M8,6L8,4C8,2.9 8.9,2 10,2L14,2C15.1,2 16,2.9 16,4L16,6"
         android:strokeWidth="2"
         android:strokeColor="#FFFFFF"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000"/>
     <path
-        android:pathData="M12,2C14.5,4.7 16,8.2 16,12C16,15.8 14.5,19.3 12,22C9.5,19.3 8,15.8 8,12C8,8.2 9.5,4.7 12,2Z"
+        android:pathData="M10,11L10,17"
+        android:strokeWidth="2"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"/>
+    <path
+        android:pathData="M14,11L14,17"
         android:strokeWidth="2"
         android:strokeColor="#FFFFFF"
         android:strokeLineCap="round"

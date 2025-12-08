@@ -16,8 +16,8 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
- * webDomainをAutofillフレームワークに渡すカスタムEditText
- * パスワードマネージャーがドメインを認識できるようになる
+ * Custom EditText that passes webDomain to the Autofill framework
+ * Allows password managers to recognize the domain
  */
 class WebDomainEditText(context: Context, private val webDomain: String) : EditText(context) {
     override fun onProvideAutofillStructure(structure: ViewStructure, flags: Int) {
@@ -31,7 +31,7 @@ class WebDomainEditText(context: Context, private val webDomain: String) : EditT
 class AuthDialogActivity : Activity() {
 
     companion object {
-        // コールバック用
+        // Callbacks
         var onCredentialsEntered: ((username: String, password: String) -> Unit)? = null
         var onDialogClosed: (() -> Unit)? = null
     }
@@ -39,21 +39,21 @@ class AuthDialogActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 背景を半透明に
+        // Make background semi-transparent
         window.setBackgroundDrawableResource(android.R.color.transparent)
         window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         window.setDimAmount(0.5f)
 
-        // メインコンテナ
+        // Main container
         val container = FrameLayout(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
             setOnClickListener {
-                // 背景タップでキャンセル
+                // Cancel on background tap
                 finish()
             }
         }
 
-        // ダイアログ本体
+        // Dialog body
         val dialog = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply {
@@ -64,7 +64,7 @@ class AuthDialogActivity : Activity() {
             val padding = 32
             setPadding(padding, padding, padding, padding)
 
-            // クリックイベントを消費（背景に伝播させない）
+            // Consume click event (don't propagate to background)
             setOnClickListener { }
         }
 
@@ -73,10 +73,10 @@ class AuthDialogActivity : Activity() {
             FrameLayout.LayoutParams.WRAP_CONTENT
         ).apply {
             gravity = Gravity.CENTER_HORIZONTAL or Gravity.TOP
-            topMargin = (resources.displayMetrics.heightPixels * 0.1).toInt()  // 画面上部10%の位置
+            topMargin = (resources.displayMetrics.heightPixels * 0.1).toInt()  // 10% from top
         }
 
-        // URLを取得してドメインを抽出
+        // Get URL and extract domain
         val url = intent?.getStringExtra("url") ?: ""
         val domain = try {
             android.net.Uri.parse(url).host ?: url
@@ -84,9 +84,9 @@ class AuthDialogActivity : Activity() {
             url
         }
 
-        // タイトル
+        // Title
         val title = TextView(this).apply {
-            text = "🔐 認証情報を入力"
+            text = "Enter Credentials"
             textSize = 18f
             setTextColor(Color.parseColor("#333333"))
             typeface = android.graphics.Typeface.DEFAULT_BOLD
@@ -95,7 +95,7 @@ class AuthDialogActivity : Activity() {
         }
         dialog.addView(title)
 
-        // ドメイン表示
+        // Domain display
         if (domain.isNotEmpty()) {
             val domainLabel = TextView(this).apply {
                 text = "🌐 $domain"
@@ -118,9 +118,9 @@ class AuthDialogActivity : Activity() {
             dialog.addView(domainLabel, domainParams)
         }
 
-        // 説明
+        // Description
         val description = TextView(this).apply {
-            text = "入力欄をタップするとパスワードマネージャーが起動します"
+            text = "Tap input fields to launch password manager"
             textSize = 13f
             setTextColor(Color.parseColor("#888888"))
             gravity = Gravity.CENTER
@@ -128,16 +128,16 @@ class AuthDialogActivity : Activity() {
         }
         dialog.addView(description)
 
-        // ユーザー名入力
+        // Username input
         val usernameLabel = TextView(this).apply {
-            text = "ユーザー名 / メール"
+            text = "Username / Email"
             textSize = 14f
             setTextColor(Color.parseColor("#333333"))
             setPadding(0, 0, 0, 8)
         }
         dialog.addView(usernameLabel)
 
-        // WebDomainEditTextを使用してパスワードマネージャーにドメインを認識させる
+        // Use WebDomainEditText so password manager can recognize the domain
         val usernameInput = WebDomainEditText(this, domain).apply {
             hint = "username@example.com"
             textSize = 16f
@@ -148,7 +148,7 @@ class AuthDialogActivity : Activity() {
             }
             setPadding(24, 20, 24, 20)
 
-            // Autofill設定
+            // Autofill settings
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
                 setAutofillHints(View.AUTOFILL_HINT_USERNAME, View.AUTOFILL_HINT_EMAIL_ADDRESS)
@@ -164,9 +164,9 @@ class AuthDialogActivity : Activity() {
         }
         dialog.addView(usernameInput, usernameParams)
 
-        // パスワード入力
+        // Password input
         val passwordLabel = TextView(this).apply {
-            text = "パスワード"
+            text = "Password"
             textSize = 14f
             setTextColor(Color.parseColor("#333333"))
             setPadding(0, 0, 0, 8)
@@ -183,7 +183,7 @@ class AuthDialogActivity : Activity() {
             }
             setPadding(24, 20, 24, 20)
 
-            // Autofill設定
+            // Autofill settings
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
                 setAutofillHints(View.AUTOFILL_HINT_PASSWORD)
@@ -199,15 +199,15 @@ class AuthDialogActivity : Activity() {
         }
         dialog.addView(passwordInput, passwordParams)
 
-        // ボタンコンテナ
+        // Button container
         val buttonContainer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.END
         }
 
-        // キャンセルボタン
+        // Cancel button
         val cancelButton = TextView(this).apply {
-            text = "キャンセル"
+            text = "Cancel"
             textSize = 16f
             setTextColor(Color.parseColor("#666666"))
             setPadding(32, 16, 32, 16)
@@ -217,9 +217,9 @@ class AuthDialogActivity : Activity() {
         }
         buttonContainer.addView(cancelButton)
 
-        // 入力ボタン
+        // Submit button
         val submitButton = TextView(this).apply {
-            text = "フォームに入力"
+            text = "Fill Form"
             textSize = 16f
             setTextColor(Color.WHITE)
             background = GradientDrawable().apply {

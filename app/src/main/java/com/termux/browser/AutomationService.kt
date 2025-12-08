@@ -24,7 +24,7 @@ class AutomationService : Service() {
         private var server: AutomationServer? = null
         private val gson = Gson()
 
-        // イベントコールバック
+        // Event callbacks
         fun onPageEvent(event: String, data: String) {
             Log.d(TAG, "Page event: $event - $data")
         }
@@ -34,7 +34,7 @@ class AutomationService : Service() {
         }
 
         fun onProgressChanged(progress: Int) {
-            // プログレス更新
+            // Progress update
         }
     }
 
@@ -189,10 +189,10 @@ class AutomationService : Service() {
                     }
                 }
 
-                // 結果を待つ
+                // Wait for result
                 synchronized(lock) {
                     try {
-                        lock.wait(5000) // 5秒タイムアウト
+                        lock.wait(5000) // 5 second timeout
                     } catch (e: InterruptedException) {
                         return errorResponse("Timeout")
                     }
@@ -212,14 +212,14 @@ class AutomationService : Service() {
                 synchronized(lock) {
                     val webView = BrowserActivity.webView
                     if (webView != null) {
-                        // WebViewのサイズを取得（バブル状態の場合は保存されたサイズを使用）
+                        // Get WebView size (use default size if in bubble state)
                         var width = webView.width
                         var height = webView.height
 
-                        // バブル状態（サイズが0）の場合、デフォルトサイズでmeasure/layout
+                        // If in bubble state (size is 0), measure/layout with default size
                         if (width <= 0 || height <= 0) {
-                            width = 1080  // デフォルト幅
-                            height = 1920  // デフォルト高さ
+                            width = 1080  // Default width
+                            height = 1920  // Default height
 
                             webView.measure(
                                 android.view.View.MeasureSpec.makeMeasureSpec(width, android.view.View.MeasureSpec.EXACTLY),

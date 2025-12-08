@@ -20,7 +20,7 @@ class BrowserActivity : Activity() {
 
         instance = this
 
-        // サービス起動後に終了
+        // Start services then finish
         startService(Intent(this, AutomationService::class.java))
         startService(Intent(this, FloatingBubbleService::class.java))
         finish()
