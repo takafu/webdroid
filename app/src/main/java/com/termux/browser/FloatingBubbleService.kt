@@ -41,11 +41,6 @@ class FloatingBubbleService : Service() {
         fun minimizeWindow() {
             instance?.minimizeToToBubble()
         }
-
-        // フルスクリーンモードから戻る
-        fun returnFromFullscreen() {
-            instance?.handleReturnFromFullscreen()
-        }
     }
 
     private lateinit var windowManager: WindowManager
@@ -57,7 +52,6 @@ class FloatingBubbleService : Service() {
     private var hiddenWebViewContainer: FrameLayout? = null  // バブル状態でWebViewを保持
     private var isExpanded = false
     private var isAnimating = false  // アニメーション中フラグ
-    private var isInFullscreenMode = false  // フルスクリーンモード中
 
     // ドラッグ用の変数（クロージャでキャプチャするためメンバー変数に）
     private var windowStartX = 0
@@ -589,26 +583,6 @@ class FloatingBubbleService : Service() {
             )
         }
 
-        // 全画面ボタン（四角アイコン）
-        val fullscreenButton = TextView(this).apply {
-            text = "⛶"
-            setTextColor(Color.WHITE)
-            textSize = 20f
-            gravity = Gravity.CENTER
-            val btnSize = 48
-            layoutParams = LinearLayout.LayoutParams(btnSize, btnSize).apply {
-                marginEnd = 8
-            }
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#33FFFFFF"))
-            }
-            setOnClickListener {
-                if (isAnimating || isInFullscreenMode) return@setOnClickListener
-                goToFullscreen()
-            }
-        }
-
         // 認証ボタン（パスワードマネージャー連携）- ログインフォーム検出時のみ表示
         val authBtn = TextView(this).apply {
             text = "🔐"
@@ -727,7 +701,6 @@ class FloatingBubbleService : Service() {
 
         header.addView(title)
         header.addView(authBtn)
-        header.addView(fullscreenButton)
         header.addView(minimizeButton)
         container.addView(header)
 
@@ -1396,69 +1369,6 @@ class FloatingBubbleService : Service() {
                     authButton?.visibility = View.GONE
                 }
             }
-        }
-    }
-
-    // フルスクリーンモードに移行
-    private fun goToFullscreen() {
-        if (!isExpanded || isInFullscreenMode) return
-
-        isInFullscreenMode = true
-
-        // ウィンドウの位置・サイズを保存
-        floatingWindowParams?.let { params ->
-            savedWindowX = params.x.toFloat()
-            savedWindowY = params.y.toFloat()
-        }
-        floatingWindow?.let { window ->
-            val container = (window as? FrameLayout)?.getChildAt(0)
-            container?.let {
-                savedWindowWidth = it.width
-                savedWindowHeight = it.height
-            }
-        }
-
-        // WebViewを切り離す
-        BrowserActivity.webView?.let { webView ->
-            (webView.parent as? android.view.ViewGroup)?.removeView(webView)
-        }
-
-        // フローティングウィンドウを非表示（削除はしない）
-        floatingWindow?.visibility = View.GONE
-
-        // BrowserActivityをフルスクリーンモードで起動
-        val intent = android.content.Intent(this, BrowserActivity::class.java).apply {
-            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(BrowserActivity.EXTRA_FULLSCREEN, true)
-        }
-        startActivity(intent)
-    }
-
-    // フルスクリーンモードから戻る
-    private fun handleReturnFromFullscreen() {
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            isInFullscreenMode = false
-
-            // WebViewを隠しコンテナに戻す
-            BrowserActivity.webView?.let { webView ->
-                (webView.parent as? android.view.ViewGroup)?.removeView(webView)
-                hiddenWebViewContainer?.addView(webView, FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                ))
-            }
-
-            // フローティングウィンドウを削除して再作成
-            floatingWindow?.let { window ->
-                try {
-                    windowManager.removeView(window)
-                } catch (e: Exception) {}
-                floatingWindow = null
-            }
-            isExpanded = false
-
-            // ウィンドウを再度開く
-            openFloatingWindow()
         }
     }
 
