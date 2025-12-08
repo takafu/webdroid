@@ -41,6 +41,11 @@ class FloatingBubbleService : Service() {
         fun minimizeWindow() {
             instance?.minimizeToToBubble()
         }
+
+        // フルスクリーンモードから戻る
+        fun returnFromFullscreen() {
+            instance?.handleReturnFromFullscreen()
+        }
     }
 
     private lateinit var windowManager: WindowManager
@@ -52,6 +57,7 @@ class FloatingBubbleService : Service() {
     private var hiddenWebViewContainer: FrameLayout? = null  // バブル状態でWebViewを保持
     private var isExpanded = false
     private var isAnimating = false  // アニメーション中フラグ
+    private var isInFullscreenMode = false  // フルスクリーンモード中
 
     // ドラッグ用の変数（クロージャでキャプチャするためメンバー変数に）
     private var windowStartX = 0
@@ -62,6 +68,10 @@ class FloatingBubbleService : Service() {
     private var savedWindowY: Float? = null
     private var savedWindowWidth: Int? = null
     private var savedWindowHeight: Int? = null
+
+    // 認証ボタン（ログインフォーム検出時のみ表示）
+    private var authButton: View? = null
+    private var hasLoginForm = false  // ログインフォームが検出されたかのフラグ
 
     override fun onCreate() {
         super.onCreate()
@@ -579,6 +589,48 @@ class FloatingBubbleService : Service() {
             )
         }
 
+        // 全画面ボタン（四角アイコン）
+        val fullscreenButton = TextView(this).apply {
+            text = "⛶"
+            setTextColor(Color.WHITE)
+            textSize = 20f
+            gravity = Gravity.CENTER
+            val btnSize = 48
+            layoutParams = LinearLayout.LayoutParams(btnSize, btnSize).apply {
+                marginEnd = 8
+            }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#33FFFFFF"))
+            }
+            setOnClickListener {
+                if (isAnimating || isInFullscreenMode) return@setOnClickListener
+                goToFullscreen()
+            }
+        }
+
+        // 認証ボタン（パスワードマネージャー連携）- ログインフォーム検出時のみ表示
+        val authBtn = TextView(this).apply {
+            text = "🔐"
+            setTextColor(Color.WHITE)
+            textSize = 18f
+            gravity = Gravity.CENTER
+            val btnSize = 48
+            layoutParams = LinearLayout.LayoutParams(btnSize, btnSize).apply {
+                marginEnd = 8
+            }
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#33FFFFFF"))
+            }
+            // hasLoginFormフラグに基づいて初期表示を決定
+            visibility = if (hasLoginForm) View.VISIBLE else View.GONE
+            setOnClickListener {
+                showAuthDialog()
+            }
+        }
+        authButton = authBtn  // メンバー変数に保存
+
         // ミニマイズボタン（丸の中に小さな丸）
         val minimizeButton = View(this).apply {
             val btnSize = 56
@@ -674,6 +726,8 @@ class FloatingBubbleService : Service() {
         }
 
         header.addView(title)
+        header.addView(authBtn)
+        header.addView(fullscreenButton)
         header.addView(minimizeButton)
         container.addView(header)
 
@@ -995,13 +1049,32 @@ class FloatingBubbleService : Service() {
 
                 // キャッシュ設定
                 cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+
+                // フォームデータ保存（パスワードマネージャー連携に必要な場合がある）
+                @Suppress("DEPRECATION")
+                setSaveFormData(true)
+                @Suppress("DEPRECATION")
+                setSavePassword(true)
             }
+
+            // デバッグ有効化
+            WebView.setWebContentsDebuggingEnabled(true)
+
+            // フォーカス設定
+            isFocusable = true
+            isFocusableInTouchMode = true
+            requestFocus(View.FOCUS_DOWN)
 
             // WebViewClient設定
             webViewClient = object : android.webkit.WebViewClient() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     AutomationService.onPageEvent("page_started", url ?: "")
+
+                    // ページ読み込み開始時に認証ボタンを非表示
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        authButton?.visibility = View.GONE
+                    }
 
                     // WebView検出を回避するJavaScriptを注入
                     view?.evaluateJavascript("""
@@ -1014,6 +1087,9 @@ class FloatingBubbleService : Service() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     AutomationService.onPageEvent("page_finished", url ?: "")
+
+                    // ログインフォームを検出して認証ボタンの表示/非表示を切り替え
+                    detectLoginForm(view)
                 }
 
                 override fun onReceivedError(
@@ -1084,6 +1160,305 @@ class FloatingBubbleService : Service() {
         if (!isExpanded) return
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             closeFloatingWindow()
+        }
+    }
+
+    // 認証ダイアログを表示
+    private fun showAuthDialog() {
+        // 現在のURLを取得
+        val currentUrl = BrowserActivity.webView?.url ?: ""
+
+        // ウィンドウの位置・サイズを保存してミニマイズ
+        floatingWindowParams?.let { params ->
+            savedWindowX = params.x.toFloat()
+            savedWindowY = params.y.toFloat()
+        }
+        floatingWindow?.let { window ->
+            val container = (window as? FrameLayout)?.getChildAt(0)
+            container?.let {
+                savedWindowWidth = it.width
+                savedWindowHeight = it.height
+            }
+        }
+
+        // 全てのオーバーレイをWindowManagerから一時的に削除（Bitwardenのタッチを妨げないように）
+        try {
+            floatingWindow?.let { windowManager.removeView(it) }
+        } catch (e: Exception) {}
+        try {
+            bubbleView?.let { windowManager.removeView(it) }
+        } catch (e: Exception) {}
+        try {
+            trashView?.let { windowManager.removeView(it) }
+        } catch (e: Exception) {}
+        try {
+            hiddenWebViewContainer?.let { windowManager.removeView(it) }
+        } catch (e: Exception) {}
+
+        // コールバックを設定
+        AuthDialogActivity.onCredentialsEntered = { username, password ->
+            // WebViewに認証情報を注入
+            injectCredentials(username, password)
+        }
+
+        // ダイアログ終了時にオーバーレイを再追加
+        AuthDialogActivity.onDialogClosed = {
+            restoreOverlays()
+        }
+
+        // AuthDialogActivityを起動（URLを渡す）
+        val intent = android.content.Intent(this, AuthDialogActivity::class.java).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra("url", currentUrl)
+        }
+        startActivity(intent)
+    }
+
+    // フローティングウィンドウを再表示
+    private fun reopenFloatingWindow() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            bubbleView?.visibility = View.INVISIBLE
+            floatingWindow?.visibility = View.VISIBLE
+        }
+    }
+
+    // オーバーレイを再追加（認証ダイアログ終了後）
+    private fun restoreOverlays() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            // hiddenWebViewContainerを再追加
+            hiddenWebViewContainer?.let { container ->
+                val params = WindowManager.LayoutParams(
+                    1080,
+                    1920,
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    else
+                        WindowManager.LayoutParams.TYPE_PHONE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                    x = 0
+                    y = 0
+                }
+                try {
+                    windowManager.addView(container, params)
+                } catch (e: Exception) {}
+            }
+
+            // trashViewを再追加
+            trashView?.let { trash ->
+                trashParams?.let { params ->
+                    try {
+                        windowManager.addView(trash, params)
+                    } catch (e: Exception) {}
+                }
+            }
+
+            // bubbleViewを再追加（非表示状態で）
+            bubbleView?.let { bubble ->
+                val bubbleParams = WindowManager.LayoutParams(
+                    130, 130,
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    else
+                        WindowManager.LayoutParams.TYPE_PHONE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.END
+                    x = 50
+                    y = 200
+                }
+                bubble.visibility = View.INVISIBLE
+                try {
+                    windowManager.addView(bubble, bubbleParams)
+                } catch (e: Exception) {}
+            }
+
+            // floatingWindowを再追加
+            floatingWindow?.let { window ->
+                floatingWindowParams?.let { params ->
+                    // 保存した位置・サイズを復元
+                    savedWindowX?.let { params.x = it.toInt() }
+                    savedWindowY?.let { params.y = it.toInt() }
+                    savedWindowWidth?.let { params.width = it }
+                    savedWindowHeight?.let { params.height = it }
+
+                    window.visibility = View.VISIBLE
+                    try {
+                        windowManager.addView(window, params)
+                    } catch (e: Exception) {}
+                }
+            }
+        }
+    }
+
+    // WebViewに認証情報を注入
+    private fun injectCredentials(username: String, password: String) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            val escapedUsername = username.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+            val escapedPassword = password.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n")
+
+            val script = """
+                (function() {
+                    // ユーザー名/メールフィールドを探す
+                    var usernameSelectors = [
+                        'input[type="text"][name*="user"]',
+                        'input[type="text"][name*="login"]',
+                        'input[type="text"][name*="email"]',
+                        'input[type="email"]',
+                        'input[name="login"]',
+                        'input[name="username"]',
+                        'input[name="email"]',
+                        'input[id*="user"]',
+                        'input[id*="login"]',
+                        'input[id*="email"]',
+                        'input[autocomplete="username"]',
+                        'input[autocomplete="email"]',
+                        'input[type="text"]:not([type="password"])'
+                    ];
+
+                    var usernameField = null;
+                    for (var i = 0; i < usernameSelectors.length; i++) {
+                        usernameField = document.querySelector(usernameSelectors[i]);
+                        if (usernameField) break;
+                    }
+
+                    // パスワードフィールドを探す
+                    var passwordField = document.querySelector('input[type="password"]');
+
+                    // 値を設定してイベントを発火
+                    function setValueAndTrigger(field, value) {
+                        if (!field) return;
+                        field.focus();
+                        field.value = value;
+                        field.dispatchEvent(new Event('input', { bubbles: true }));
+                        field.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+
+                    if (usernameField && '$escapedUsername') {
+                        setValueAndTrigger(usernameField, '$escapedUsername');
+                    }
+                    if (passwordField && '$escapedPassword') {
+                        setValueAndTrigger(passwordField, '$escapedPassword');
+                    }
+
+                    return {
+                        usernameFound: !!usernameField,
+                        passwordFound: !!passwordField
+                    };
+                })();
+            """.trimIndent()
+
+            BrowserActivity.webView?.evaluateJavascript(script) { result ->
+                android.util.Log.d("FloatingBubble", "Credentials injected: $result")
+            }
+        }
+    }
+
+    // ログインフォームを検出して認証ボタンの表示/非表示を切り替え
+    private fun detectLoginForm(view: WebView?) {
+        val script = """
+            (function() {
+                // パスワードフィールドがあるかチェック
+                var passwordField = document.querySelector('input[type="password"]');
+                if (passwordField) return true;
+
+                // ログインフォームっぽい要素をチェック
+                var loginIndicators = [
+                    'input[name*="login"]',
+                    'input[name*="user"]',
+                    'input[name*="email"]',
+                    'input[autocomplete="username"]',
+                    'input[autocomplete="email"]',
+                    'form[action*="login"]',
+                    'form[action*="signin"]',
+                    'form[action*="auth"]'
+                ];
+
+                for (var i = 0; i < loginIndicators.length; i++) {
+                    if (document.querySelector(loginIndicators[i])) return true;
+                }
+
+                return false;
+            })();
+        """.trimIndent()
+
+        view?.evaluateJavascript(script) { result ->
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                hasLoginForm = (result == "true")
+                if (hasLoginForm) {
+                    authButton?.visibility = View.VISIBLE
+                } else {
+                    authButton?.visibility = View.GONE
+                }
+            }
+        }
+    }
+
+    // フルスクリーンモードに移行
+    private fun goToFullscreen() {
+        if (!isExpanded || isInFullscreenMode) return
+
+        isInFullscreenMode = true
+
+        // ウィンドウの位置・サイズを保存
+        floatingWindowParams?.let { params ->
+            savedWindowX = params.x.toFloat()
+            savedWindowY = params.y.toFloat()
+        }
+        floatingWindow?.let { window ->
+            val container = (window as? FrameLayout)?.getChildAt(0)
+            container?.let {
+                savedWindowWidth = it.width
+                savedWindowHeight = it.height
+            }
+        }
+
+        // WebViewを切り離す
+        BrowserActivity.webView?.let { webView ->
+            (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+        }
+
+        // フローティングウィンドウを非表示（削除はしない）
+        floatingWindow?.visibility = View.GONE
+
+        // BrowserActivityをフルスクリーンモードで起動
+        val intent = android.content.Intent(this, BrowserActivity::class.java).apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(BrowserActivity.EXTRA_FULLSCREEN, true)
+        }
+        startActivity(intent)
+    }
+
+    // フルスクリーンモードから戻る
+    private fun handleReturnFromFullscreen() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            isInFullscreenMode = false
+
+            // WebViewを隠しコンテナに戻す
+            BrowserActivity.webView?.let { webView ->
+                (webView.parent as? android.view.ViewGroup)?.removeView(webView)
+                hiddenWebViewContainer?.addView(webView, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                ))
+            }
+
+            // フローティングウィンドウを削除して再作成
+            floatingWindow?.let { window ->
+                try {
+                    windowManager.removeView(window)
+                } catch (e: Exception) {}
+                floatingWindow = null
+            }
+            isExpanded = false
+
+            // ウィンドウを再度開く
+            openFloatingWindow()
         }
     }
 
