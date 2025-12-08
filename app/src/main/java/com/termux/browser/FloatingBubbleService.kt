@@ -776,9 +776,9 @@ class FloatingBubbleService : Service() {
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             else
                 WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -802,6 +802,32 @@ class FloatingBubbleService : Service() {
         floatingWindowParams = windowParams
         windowManager.addView(wrapper, windowParams)
         isExpanded = true
+
+        // ウィンドウ外タップでフォーカス解放
+        wrapper.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_OUTSIDE) {
+                // フォーカスを解放（FLAG_NOT_FOCUSABLEを追加）
+                windowParams.flags = windowParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                windowManager.updateViewLayout(wrapper, windowParams)
+            }
+            false
+        }
+
+        // WebViewタップでフォーカス取得
+        BrowserActivity.webView?.setOnTouchListener { view, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                // フォーカスを取得（FLAG_NOT_FOCUSABLEを削除）
+                val hasFocusFlag = (windowParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) != 0
+                if (hasFocusFlag) {
+                    windowParams.flags = windowParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                    windowManager.updateViewLayout(wrapper, windowParams)
+                }
+                // WebViewにフォーカスをリクエスト
+                view.requestFocus()
+            }
+            // falseを返してWebViewのタッチ処理を継続
+            false
+        }
 
         // ローカル関数：wrapperをUIサイズに縮小（開くアニメ完了時）
         val shrinkWrapperToUI = {
