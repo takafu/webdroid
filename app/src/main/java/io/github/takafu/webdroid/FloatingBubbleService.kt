@@ -130,6 +130,12 @@ class FloatingBubbleService : Service() {
     private var authButton: View? = null
     private var hasLoginForm = false  // Login form detected flag
 
+    // Custom velocity tracking (more stable than VelocityTracker)
+    private data class TouchSample(val x: Float, val y: Float, val time: Long)
+    private val touchHistory = mutableListOf<TouchSample>()
+    private val TOUCH_HISTORY_SIZE = 10  // Keep last 10 samples
+    private val VELOCITY_TIME_WINDOW = 100L  // Use samples from last 100ms
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -348,6 +354,10 @@ class FloatingBubbleService : Service() {
                     velocityTracker = VelocityTracker.obtain()
                     velocityTracker?.addMovement(event)
 
+                    // Initialize custom touch history
+                    touchHistory.clear()
+                    touchHistory.add(TouchSample(event.rawX, event.rawY, System.currentTimeMillis()))
+
                     // Scale down animation on tap
                     v.animate()
                         .scaleX(0.85f)
@@ -358,6 +368,12 @@ class FloatingBubbleService : Service() {
                 }
                 MotionEvent.ACTION_MOVE -> {
                     velocityTracker?.addMovement(event)
+
+                    // Add to custom touch history
+                    touchHistory.add(TouchSample(event.rawX, event.rawY, System.currentTimeMillis()))
+                    if (touchHistory.size > TOUCH_HISTORY_SIZE) {
+                        touchHistory.removeAt(0)
+                    }
 
                     val deltaX = Math.abs(event.rawX - initialTouchX)
                     val deltaY = Math.abs(event.rawY - initialTouchY)
@@ -439,12 +455,26 @@ class FloatingBubbleService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    velocityTracker?.addMovement(event)
-                    velocityTracker?.computeCurrentVelocity(1000)
-                    val velocityX = velocityTracker?.xVelocity ?: 0f
-                    val velocityY = velocityTracker?.yVelocity ?: 0f
+                    // Calculate velocity from custom touch history
+                    val currentTime = System.currentTimeMillis()
+                    val recentSamples = touchHistory.filter {
+                        currentTime - it.time <= VELOCITY_TIME_WINDOW
+                    }
+
+                    val (velocityX, velocityY) = if (recentSamples.size >= 2) {
+                        val oldest = recentSamples.first()
+                        val newest = recentSamples.last()
+                        val dt = (newest.time - oldest.time).coerceAtLeast(1L) / 1000f
+                        val vx = (newest.x - oldest.x) / dt
+                        val vy = (newest.y - oldest.y) / dt
+                        Pair(vx, vy)
+                    } else {
+                        Pair(0f, 0f)
+                    }
+
                     velocityTracker?.recycle()
                     velocityTracker = null
+                    touchHistory.clear()
 
                     // Restore original size
                     v.animate()
