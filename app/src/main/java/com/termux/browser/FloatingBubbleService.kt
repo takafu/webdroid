@@ -1015,6 +1015,9 @@ class FloatingBubbleService : Service() {
         windowManager.addView(wrapper, windowParams)
         isExpanded = true
 
+        // Re-check login form detection (in case page was already loaded)
+        detectLoginForm(BrowserActivity.webView)
+
         // Release focus on tap outside window
         wrapper.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_OUTSIDE) {
@@ -1273,6 +1276,16 @@ class FloatingBubbleService : Service() {
                 ) {
                     super.onReceivedError(view, request, error)
                     AutomationService.onPageEvent("error", error?.description?.toString() ?: "Unknown error")
+                }
+
+                override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                    super.doUpdateVisitedHistory(view, url, isReload)
+                    android.util.Log.d("FloatingBubble", "doUpdateVisitedHistory: url=$url, isReload=$isReload")
+                    // Re-detect login form on URL change (for SPA-style navigation)
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        android.util.Log.d("FloatingBubble", "doUpdateVisitedHistory: detecting login form")
+                        detectLoginForm(view)
+                    }, 500)  // Small delay for page to render
                 }
             }
 
@@ -1616,6 +1629,7 @@ class FloatingBubbleService : Service() {
 
     // Detect login form and toggle auth button visibility
     private fun detectLoginForm(view: WebView?) {
+        android.util.Log.d("FloatingBubble", "detectLoginForm called, view=$view, authButton=$authButton")
         val script = """
             (function() {
                 // Check for password field
@@ -1643,8 +1657,10 @@ class FloatingBubbleService : Service() {
         """.trimIndent()
 
         view?.evaluateJavascript(script) { result ->
+            android.util.Log.d("FloatingBubble", "detectLoginForm result: $result")
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 hasLoginForm = (result == "true")
+                android.util.Log.d("FloatingBubble", "detectLoginForm: hasLoginForm=$hasLoginForm, setting authButton visibility")
                 if (hasLoginForm) {
                     authButton?.visibility = View.VISIBLE
                 } else {
